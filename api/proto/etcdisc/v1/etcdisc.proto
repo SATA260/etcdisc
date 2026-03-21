@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package etcdisc.v1;
+
+option go_package = "etcdisc/api/proto/etcdisc/v1;etcdiscv1";
+
+// This proto documents the phase 1 gRPC surface implemented by the JSON codec based server.
+
+service RegistryService {}
+service DiscoveryService {}
+service ConfigService {}
+service A2AService {}
