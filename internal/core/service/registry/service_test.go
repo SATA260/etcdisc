@@ -86,6 +86,8 @@ func TestUpdateRequiresCASRevision(t *testing.T) {
 	_, err = svc.Update(context.Background(), UpdateInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Weight: &weight, ExpectedRevision: registered.Revision + 1})
 	require.Error(t, err)
 	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
+	_, err = svc.Update(context.Background(), UpdateInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Weight: &weight})
+	require.Equal(t, apperrors.CodeInvalidArgument, apperrors.CodeOf(err))
 }
 
 func TestHeartbeatRefreshesHeartbeatModeOnly(t *testing.T) {
@@ -103,6 +105,11 @@ func TestHeartbeatRefreshesHeartbeatModeOnly(t *testing.T) {
 	heartbeat, err := svc.Heartbeat(context.Background(), HeartbeatInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID})
 	require.NoError(t, err)
 	require.NotZero(t, heartbeat.LastHeartbeatAt)
+
+	probeInstance, err := svc.Register(context.Background(), RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "probe-api", InstanceID: "node-2", Address: "127.0.0.2", Port: 8081, HealthCheckMode: model.HealthCheckTCPProbe}})
+	require.NoError(t, err)
+	_, err = svc.Heartbeat(context.Background(), HeartbeatInput{Namespace: probeInstance.Namespace, Service: probeInstance.Service, InstanceID: probeInstance.InstanceID})
+	require.Equal(t, apperrors.CodeFailedPrecondition, apperrors.CodeOf(err))
 }
 
 func TestProbeRegistrationDoesNotUseLeaseAndSupportsDefaultProbeTarget(t *testing.T) {
@@ -147,6 +154,11 @@ func TestApplyProbeResultTransitionsAndDeletes(t *testing.T) {
 	_, deleted, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy})
 	require.NoError(t, err)
 	require.True(t, deleted)
+
+	heartbeatInstance, err := svc.Register(context.Background(), RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "heartbeat-api", InstanceID: "node-2", Address: "127.0.0.2", Port: 8081}})
+	require.NoError(t, err)
+	_, _, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: heartbeatInstance.Namespace, Service: heartbeatInstance.Service, InstanceID: heartbeatInstance.InstanceID, Success: false})
+	require.Equal(t, apperrors.CodeFailedPrecondition, apperrors.CodeOf(err))
 }
 
 func TestListFiltersByHealthyStateAndMetadata(t *testing.T) {
@@ -167,6 +179,10 @@ func TestListFiltersByHealthyStateAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, "node-1", items[0].InstanceID)
+
+	items, err = svc.List(context.Background(), ListFilter{Namespace: "prod-core", Service: "payment-api", HealthyOnly: false, Version: "", Group: model.DefaultGroup})
+	require.NoError(t, err)
+	require.Len(t, items, 2)
 }
 
 func TestDeregisterRemovesInstance(t *testing.T) {

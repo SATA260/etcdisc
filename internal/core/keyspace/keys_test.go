@@ -12,13 +12,24 @@ import (
 func TestKeyBuilders(t *testing.T) {
 	t.Parallel()
 
+	require.Equal(t, "/etcdisc/namespaces/", NamespacePrefix())
 	require.Equal(t, "/etcdisc/namespaces/prod", NamespaceKey("prod"))
+	require.Equal(t, "/etcdisc/instances/prod/", InstanceNamespacePrefix("prod"))
 	require.Equal(t, "/etcdisc/instances/prod/pay/node-1", InstanceKey("prod", "pay", "node-1"))
+	require.Equal(t, "/etcdisc/instances/prod/pay/", InstanceServicePrefix("prod", "pay"))
+	require.Equal(t, "/etcdisc/instances/", InstanceRootPrefix())
 	require.Equal(t, "/etcdisc/config/global/timeout.request", ConfigKey(model.ConfigScopeGlobal, "", "", "timeout.request"))
 	require.Equal(t, "/etcdisc/config/namespaces/prod/timeout.request", ConfigKey(model.ConfigScopeNamespace, "prod", "", "timeout.request"))
 	require.Equal(t, "/etcdisc/config/services/prod/pay/timeout.request", ConfigKey(model.ConfigScopeService, "prod", "pay", "timeout.request"))
+	require.Equal(t, "/etcdisc/config/global/", ConfigPrefix(model.ConfigScopeGlobal, "", ""))
+	require.Equal(t, "/etcdisc/config/namespaces/prod/", ConfigPrefix(model.ConfigScopeNamespace, "prod", ""))
+	require.Equal(t, "/etcdisc/config/services/prod/pay/", ConfigPrefix(model.ConfigScopeService, "prod", "pay"))
+	require.Equal(t, "/etcdisc/config/", ConfigRootPrefix())
 	require.Equal(t, "/etcdisc/agentcards/prod/agent-1", AgentCardKey("prod", "agent-1"))
+	require.Equal(t, "/etcdisc/agentcards/prod/", AgentCardNamespacePrefix("prod"))
 	require.Equal(t, "/etcdisc/capabilities/prod/tool.search/agent-1", CapabilityKey("prod", "tool.search", "agent-1"))
+	require.Equal(t, "/etcdisc/capabilities/prod/tool.search/", CapabilityPrefix("prod", "tool.search"))
+	require.Equal(t, "/etcdisc/audit/", AuditPrefix())
 }
 
 func TestResourceFromKey(t *testing.T) {

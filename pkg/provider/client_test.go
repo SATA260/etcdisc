@@ -58,6 +58,9 @@ func TestClient(t *testing.T) {
 	_, err := client.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "pay"}})
 	require.NoError(t, err)
 	require.Equal(t, 1, transport.registerCalls)
+	_, err = client.Heartbeat(context.Background(), registrysvc.HeartbeatInput{Namespace: "prod", Service: "pay", InstanceID: "node-1"})
+	require.NoError(t, err)
+	require.Equal(t, 1, transport.heartbeatCalls)
 
 	require.NoError(t, client.Deregister(context.Background(), registrysvc.DeregisterInput{Namespace: "prod", Service: "pay", InstanceID: "node-1"}))
 	require.Equal(t, 1, transport.deregisterCalls)
@@ -120,4 +123,7 @@ func TestGRPCTransport(t *testing.T) {
 	instance, err := transport.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "pay", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}})
 	require.NoError(t, err)
 	require.Equal(t, "node-1", instance.InstanceID)
+	_, err = transport.Heartbeat(context.Background(), registrysvc.HeartbeatInput{Namespace: "prod", Service: "pay", InstanceID: "node-1"})
+	require.NoError(t, err)
+	require.NoError(t, transport.Deregister(context.Background(), registrysvc.DeregisterInput{Namespace: "prod", Service: "pay", InstanceID: "node-1"}))
 }

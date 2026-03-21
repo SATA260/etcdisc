@@ -23,6 +23,16 @@ func TestHealthHandler(t *testing.T) {
 	require.Equal(t, "ok", resp.Body.String())
 }
 
+func TestReadyHandlerAlias(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	resp := httptest.NewRecorder()
+	ReadyHandler(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+	require.Equal(t, "ready", resp.Body.String())
+}
+
 func TestNewReadyHandler(t *testing.T) {
 	t.Parallel()
 

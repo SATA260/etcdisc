@@ -80,4 +80,5 @@ func TestNamespaceAccessChecks(t *testing.T) {
 	require.NoError(t, svc.CheckWrite(ctx, created.Name, false))
 	require.NoError(t, svc.CheckRead(ctx, created.Name, true))
 	require.NoError(t, svc.CheckWrite(ctx, created.Name, true))
+	require.NoError(t, svc.TouchExists(ctx, created.Name))
 }

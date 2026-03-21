@@ -45,4 +45,36 @@ func TestRegistryAPI(t *testing.T) {
 	deregisterResp := httptest.NewRecorder()
 	api.Deregister(deregisterResp, httptest.NewRequest(http.MethodPost, "/v1/registry/deregister", strings.NewReader(`{"namespace":"prod-core","service":"payment-api","instanceId":"node-1"}`)))
 	require.Equal(t, http.StatusOK, deregisterResp.Code)
+
+	methodResp := httptest.NewRecorder()
+	api.Register(methodResp, httptest.NewRequest(http.MethodGet, "/v1/registry/register", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, methodResp.Code)
+
+	badRegisterResp := httptest.NewRecorder()
+	api.Register(badRegisterResp, httptest.NewRequest(http.MethodPost, "/v1/registry/register", strings.NewReader(`{"instance":`)))
+	require.Equal(t, http.StatusBadRequest, badRegisterResp.Code)
+
+	badJSONResp := httptest.NewRecorder()
+	api.Update(badJSONResp, httptest.NewRequest(http.MethodPost, "/v1/registry/update", strings.NewReader(`{"namespace":`)))
+	require.Equal(t, http.StatusBadRequest, badJSONResp.Code)
+
+	heartbeatMethodResp := httptest.NewRecorder()
+	api.Heartbeat(heartbeatMethodResp, httptest.NewRequest(http.MethodGet, "/v1/registry/heartbeat", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, heartbeatMethodResp.Code)
+
+	badHeartbeatResp := httptest.NewRecorder()
+	api.Heartbeat(badHeartbeatResp, httptest.NewRequest(http.MethodPost, "/v1/registry/heartbeat", strings.NewReader(`{"namespace":`)))
+	require.Equal(t, http.StatusBadRequest, badHeartbeatResp.Code)
+
+	updateMethodResp := httptest.NewRecorder()
+	api.Update(updateMethodResp, httptest.NewRequest(http.MethodGet, "/v1/registry/update", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, updateMethodResp.Code)
+
+	deregisterMethodResp := httptest.NewRecorder()
+	api.Deregister(deregisterMethodResp, httptest.NewRequest(http.MethodGet, "/v1/registry/deregister", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, deregisterMethodResp.Code)
+
+	badDeregisterResp := httptest.NewRecorder()
+	api.Deregister(badDeregisterResp, httptest.NewRequest(http.MethodPost, "/v1/registry/deregister", strings.NewReader(`{"namespace":`)))
+	require.Equal(t, http.StatusBadRequest, badDeregisterResp.Code)
 }

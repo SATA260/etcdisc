@@ -39,4 +39,20 @@ func TestA2AAPI(t *testing.T) {
 	api.Discover(discoverResp, httptest.NewRequest(http.MethodGet, "/v1/a2a/discovery?namespace=prod-core&capability=tool.search&protocol=grpc", nil))
 	require.Equal(t, http.StatusOK, discoverResp.Code)
 	require.Contains(t, discoverResp.Body.String(), "10.0.0.9")
+
+	methodResp := httptest.NewRecorder()
+	api.UpsertCard(methodResp, httptest.NewRequest(http.MethodGet, "/v1/a2a/agentcards", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, methodResp.Code)
+
+	badJSONResp := httptest.NewRecorder()
+	api.UpsertCard(badJSONResp, httptest.NewRequest(http.MethodPost, "/v1/a2a/agentcards", strings.NewReader(`{"card":`)))
+	require.Equal(t, http.StatusBadRequest, badJSONResp.Code)
+
+	discoverMethodResp := httptest.NewRecorder()
+	api.Discover(discoverMethodResp, httptest.NewRequest(http.MethodPost, "/v1/a2a/discovery", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, discoverMethodResp.Code)
+
+	invalidResp := httptest.NewRecorder()
+	api.Discover(invalidResp, httptest.NewRequest(http.MethodGet, "/v1/a2a/discovery?namespace=prod-core&capability=bad%20capability", nil))
+	require.Equal(t, http.StatusBadRequest, invalidResp.Code)
 }

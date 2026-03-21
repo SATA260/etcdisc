@@ -40,7 +40,8 @@ func TestHTTPStatusOf(t *testing.T) {
 func TestGRPCStatusOf(t *testing.T) {
 	t.Parallel()
 
-	appErr := Wrap(CodeConflict, "conflict", errors.New("revision mismatch"))
+	cause := errors.New("revision mismatch")
+	appErr := Wrap(CodeConflict, "conflict", cause)
 	status := GRPCStatusOf(appErr)
 
 	require.Equal(t, codes.Aborted, status.Code())
@@ -48,4 +49,32 @@ func TestGRPCStatusOf(t *testing.T) {
 	require.True(t, IsCode(appErr, CodeConflict))
 	require.Equal(t, CodeConflict, CodeOf(appErr))
 	require.Equal(t, "conflict", MessageOf(appErr))
+	require.Contains(t, appErr.Error(), "conflict")
+	typed := appErr.(*Error)
+	require.ErrorIs(t, typed.Unwrap(), cause)
+}
+
+func TestErrorHelpersAndFallbacks(t *testing.T) {
+	t.Parallel()
+
+	err := &Error{Code: CodeUnauthorized, Message: "no token"}
+	require.Equal(t, codes.Unauthenticated, err.GRPCCode())
+	require.Equal(t, "no token", err.Error())
+	require.Equal(t, codes.Internal, GRPCStatusOf(errors.New("boom")).Code())
+	require.Equal(t, "boom", MessageOf(errors.New("boom")))
+
+	tests := []struct {
+		code     Code
+		grpcCode codes.Code
+	}{
+		{CodeInvalidArgument, codes.InvalidArgument},
+		{CodeForbidden, codes.PermissionDenied},
+		{CodeNotFound, codes.NotFound},
+		{CodeAlreadyExists, codes.AlreadyExists},
+		{CodeFailedPrecondition, codes.FailedPrecondition},
+		{CodeUnavailable, codes.Unavailable},
+	}
+	for _, tc := range tests {
+		require.Equal(t, tc.grpcCode, (&Error{Code: tc.code, Message: "x"}).GRPCCode())
+	}
 }

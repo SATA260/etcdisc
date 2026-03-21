@@ -57,6 +57,31 @@ func TestPutRequiresCASOnUpdate(t *testing.T) {
 	_, err = svc.Put(context.Background(), PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeNamespace, Namespace: "prod-core", Key: "feature.enabled", Value: "false", ValueType: model.ConfigValueBool}, ExpectedRevision: item.Revision + 1})
 	require.Error(t, err)
 	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
+	_, err = svc.Put(context.Background(), PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeNamespace, Namespace: "prod-core", Key: "feature.enabled", Value: "not-bool", ValueType: model.ConfigValueBool}})
+	require.Equal(t, apperrors.CodeInvalidArgument, apperrors.CodeOf(err))
+}
+
+func TestGetRawAndResolveClientOverrides(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewMemoryStore()
+	nsService := namespacesvc.NewService(store, namespacesvc.NewFixedClock(time.Now()))
+	_, err := nsService.Create(context.Background(), namespacesvc.CreateNamespaceInput{Name: "prod-core"})
+	require.NoError(t, err)
+	svc := NewService(store, nsService, namespacesvc.NewFixedClock(time.Now()))
+
+	_, err = svc.Put(context.Background(), PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeGlobal, Key: "timeout.request", Value: "1000", ValueType: model.ConfigValueDuration}})
+	require.NoError(t, err)
+	items, err := svc.GetRaw(context.Background(), model.ConfigScopeGlobal, "", "", false)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	resolved, err := svc.Resolve(context.Background(), ResolveInput{Namespace: "prod-core", Service: "payment-api", ClientOverrides: map[string]model.ConfigItem{"timeout.request": {Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "timeout.request", Value: "1500", ValueType: model.ConfigValueDuration}}})
+	require.NoError(t, err)
+	require.Equal(t, "1500", resolved["timeout.request"].Value)
+
+	err = svc.Delete(context.Background(), DeleteInput{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "timeout.request"})
+	require.Equal(t, apperrors.CodeInvalidArgument, apperrors.CodeOf(err))
 }
 
 func TestWatchStreamsSingleKeyEvents(t *testing.T) {
@@ -71,6 +96,7 @@ func TestWatchStreamsSingleKeyEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	watchCh := svc.Watch(ctx, WatchInput{Namespace: "prod-core", Service: "payment-api"})
+	time.Sleep(20 * time.Millisecond)
 	_, err = svc.Put(context.Background(), PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "timeout.request", Value: "1000", ValueType: model.ConfigValueDuration}})
 	require.NoError(t, err)
 

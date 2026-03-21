@@ -28,6 +28,14 @@ func TestProbeHTTP(t *testing.T) {
 	service := NewService()
 	result := service.Probe(context.Background(), model.Instance{HealthCheckMode: model.HealthCheckHTTPProbe, ProbeConfig: model.ProbeConfig{Address: host, Port: port, Path: "/"}})
 	require.True(t, result.Success)
+
+	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer badServer.Close()
+	host, port = splitHostPort(t, badServer.Listener.Addr().String())
+	result = service.Probe(context.Background(), model.Instance{HealthCheckMode: model.HealthCheckHTTPProbe, ProbeConfig: model.ProbeConfig{Address: host, Port: port, Path: "/"}})
+	require.False(t, result.Success)
 }
 
 func TestProbeTCP(t *testing.T) {
@@ -46,6 +54,9 @@ func TestProbeTCP(t *testing.T) {
 	service := NewService()
 	result := service.Probe(context.Background(), model.Instance{HealthCheckMode: model.HealthCheckTCPProbe, ProbeConfig: model.ProbeConfig{Address: host, Port: port}})
 	require.True(t, result.Success)
+	_ = listener.Close()
+	result = service.Probe(context.Background(), model.Instance{HealthCheckMode: model.HealthCheckTCPProbe, ProbeConfig: model.ProbeConfig{Address: host, Port: port}})
+	require.False(t, result.Success)
 }
 
 func TestProbeGRPC(t *testing.T) {
@@ -69,6 +80,10 @@ func TestProbeGRPC(t *testing.T) {
 	service := NewService()
 	result := service.Probe(ctx, model.Instance{HealthCheckMode: model.HealthCheckGRPCProbe, ProbeConfig: model.ProbeConfig{Address: host, Port: port, Path: "/etcdisc/grpc/health"}})
 	require.True(t, result.Success)
+
+	server.Stop()
+	result = (*Service)(nil).Probe(context.Background(), model.Instance{HealthCheckMode: model.HealthCheckMode("custom"), ProbeConfig: model.ProbeConfig{Address: host, Port: port}})
+	require.False(t, result.Success)
 }
 
 func splitHostPort(t *testing.T, address string) (string, int) {

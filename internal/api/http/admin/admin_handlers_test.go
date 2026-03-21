@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,21 +47,50 @@ func TestAdminHandlers(t *testing.T) {
 	configResp := httptest.NewRecorder()
 	ConfigAPI{Service: configService, Audit: auditService}.HandleItems(configResp, httptest.NewRequest(http.MethodPost, "/admin/v1/config/items", strings.NewReader(`{"item":{"scope":"service","namespace":"prod-core","service":"payment-api","key":"timeout.request","value":"1000","valueType":"duration"}}`)))
 	require.Equal(t, http.StatusCreated, configResp.Code)
+	items, err := configService.GetRaw(context.Background(), model.ConfigScopeService, "prod-core", "payment-api", true)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	invalidScopeResp := httptest.NewRecorder()
+	ConfigAPI{Service: configService, Audit: auditService}.HandleItems(invalidScopeResp, httptest.NewRequest(http.MethodGet, "/admin/v1/config/items?scope=invalid", nil))
+	require.Equal(t, http.StatusBadRequest, invalidScopeResp.Code)
+
+	configListResp := httptest.NewRecorder()
+	ConfigAPI{Service: configService, Audit: auditService}.HandleItems(configListResp, httptest.NewRequest(http.MethodGet, "/admin/v1/config/items?scope=service&namespace=prod-core&service=payment-api", nil))
+	require.Equal(t, http.StatusOK, configListResp.Code)
+	require.Contains(t, configListResp.Body.String(), "timeout.request")
+
+	deleteResp := httptest.NewRecorder()
+	ConfigAPI{Service: configService, Audit: auditService}.HandleItems(deleteResp, httptest.NewRequest(http.MethodDelete, "/admin/v1/config/items", strings.NewReader(`{"scope":"service","namespace":"prod-core","service":"payment-api","key":"timeout.request","expectedRevision":`+strconv.FormatInt(items[0].Revision, 10)+`}`)))
+	require.Equal(t, http.StatusOK, deleteResp.Code)
 
 	instancesResp := httptest.NewRecorder()
 	InstanceAPI{Service: registry}.HandleList(instancesResp, httptest.NewRequest(http.MethodGet, "/admin/v1/services/instances?namespace=prod-core", nil))
 	require.Equal(t, http.StatusOK, instancesResp.Code)
 	require.Contains(t, instancesResp.Body.String(), "payment-api")
 
+	instanceMethodResp := httptest.NewRecorder()
+	InstanceAPI{Service: registry}.HandleList(instanceMethodResp, httptest.NewRequest(http.MethodPost, "/admin/v1/services/instances", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, instanceMethodResp.Code)
+
 	a2aResp := httptest.NewRecorder()
 	A2AAPI{Service: a2aService}.HandleCards(a2aResp, httptest.NewRequest(http.MethodGet, "/admin/v1/agentcards?namespace=prod-core&capability=tool.search", nil))
 	require.Equal(t, http.StatusOK, a2aResp.Code)
 	require.Contains(t, a2aResp.Body.String(), "agent-1")
 
+	a2aListResp := httptest.NewRecorder()
+	A2AAPI{Service: a2aService}.HandleCards(a2aListResp, httptest.NewRequest(http.MethodGet, "/admin/v1/agentcards?namespace=prod-core", nil))
+	require.Equal(t, http.StatusOK, a2aListResp.Code)
+	require.Contains(t, a2aListResp.Body.String(), "agent-1")
+
 	auditResp := httptest.NewRecorder()
 	AuditAPI{Service: auditService}.HandleList(auditResp, httptest.NewRequest(http.MethodGet, "/admin/v1/audit", nil))
 	require.Equal(t, http.StatusOK, auditResp.Code)
 	require.Contains(t, auditResp.Body.String(), "seed")
+
+	auditMethodResp := httptest.NewRecorder()
+	AuditAPI{Service: auditService}.HandleList(auditMethodResp, httptest.NewRequest(http.MethodPost, "/admin/v1/audit", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, auditMethodResp.Code)
 
 	systemResp := httptest.NewRecorder()
 	SystemAPI{Ready: func(context.Context) error { return nil }, Metrics: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("metrics")) })}.HandleSummary(systemResp, httptest.NewRequest(http.MethodGet, "/admin/v1/system", nil))
@@ -71,4 +101,12 @@ func TestAdminHandlers(t *testing.T) {
 	SystemAPI{Metrics: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("metrics")) })}.HandleMetrics(metricsResp, httptest.NewRequest(http.MethodGet, "/admin/v1/system/metrics", nil))
 	require.Equal(t, http.StatusOK, metricsResp.Code)
 	require.Contains(t, metricsResp.Body.String(), "metrics")
+
+	missingMetricsResp := httptest.NewRecorder()
+	SystemAPI{}.HandleMetrics(missingMetricsResp, httptest.NewRequest(http.MethodGet, "/admin/v1/system/metrics", nil))
+	require.Equal(t, http.StatusNotFound, missingMetricsResp.Code)
+
+	metricsMethodResp := httptest.NewRecorder()
+	SystemAPI{}.HandleMetrics(metricsMethodResp, httptest.NewRequest(http.MethodPost, "/admin/v1/system/metrics", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, metricsMethodResp.Code)
 }

@@ -7,8 +7,14 @@ import (
 	"etcdisc/internal/app/bootstrap"
 )
 
+var bootstrapRun = bootstrap.Run
+
+func run() error {
+	return bootstrapRun()
+}
+
 func main() {
-	if err := bootstrap.Run(); err != nil {
+	if err := run(); err != nil {
 		log.Fatal(err)
 	}
 }

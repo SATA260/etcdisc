@@ -55,6 +55,8 @@ func TestInstanceAppliesProbeDefaults(t *testing.T) {
 	require.Equal(t, "10.0.0.8", instance.ProbeConfig.Address)
 	require.Equal(t, 8080, instance.ProbeConfig.Port)
 	require.NoError(t, instance.Validate())
+	require.True(t, instance.HealthCheckMode.IsProbe())
+	require.Equal(t, "10.0.0.8:8080", instance.Endpoint())
 }
 
 func TestInstanceValidateRejectsInvalidWeight(t *testing.T) {
@@ -107,9 +109,29 @@ func TestAgentCardValidate(t *testing.T) {
 	}
 
 	require.NoError(t, card.Validate())
+	require.True(t, AuthModeNone.Valid())
+	require.True(t, AuthModeStaticToken.Valid())
+	require.True(t, AuthModeMTLS.Valid())
 
 	card.Capabilities = []string{"Bad Capability"}
 	require.Error(t, card.Validate())
+}
+
+func TestConfigAndNamespaceEnums(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, ConfigScopeGlobal.Valid())
+	require.True(t, ConfigScopeNamespace.Valid())
+	require.True(t, ConfigScopeService.Valid())
+	require.True(t, ConfigValueString.Valid())
+	require.True(t, ConfigValueInt.Valid())
+	require.True(t, ConfigValueBool.Valid())
+	require.True(t, ConfigValueDuration.Valid())
+	require.True(t, ConfigValueJSON.Valid())
+	require.True(t, NamespaceAccessReadOnly.Valid())
+	require.True(t, NamespaceAccessWriteOnly.Valid())
+	require.True(t, NamespaceAccessNoReadNoWrite.Valid())
+	require.True(t, InstanceStatusUnhealth.Valid())
 }
 
 func TestValidationHelpers(t *testing.T) {
@@ -126,4 +148,5 @@ func TestValidationHelpers(t *testing.T) {
 	require.Error(t, ValidateCapabilityName("bad capability"))
 	require.Error(t, ValidateConfigKey("Bad.Key"))
 	require.Error(t, ValidateFlatMetadata(map[string]string{"bad key!": "v"}))
+	require.Equal(t, map[string]string{"a": "1", "b": "2"}, CopyStringMap(map[string]string{"b": "2", "a": "1"}))
 }

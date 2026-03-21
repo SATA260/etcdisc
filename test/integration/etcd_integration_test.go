@@ -26,12 +26,27 @@ func TestRealEtcdPhase1Flows(t *testing.T) {
 		t.Skip("set ETCDISC_RUN_INTEGRATION=1 to run real etcd integration tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cfg := appconfig.Default()
 	client, err := infraetcd.NewClient(cfg)
 	require.NoError(t, err)
 	defer client.Close()
+	ready := false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, err := client.Get(probeCtx, "health")
+		probeCancel()
+		if err == nil {
+			ready = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !ready {
+		t.Skip("local etcd did not become ready in time")
+	}
 	store := infraetcd.NewStore(client)
 	clk := clock.RealClock{}
 	namespaceService := namespacesvc.NewService(store, clk)

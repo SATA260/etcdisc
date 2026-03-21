@@ -14,6 +14,7 @@ func TestApplyProbeResult(t *testing.T) {
 	t.Parallel()
 
 	manager := NewManager()
+	require.Equal(t, Policy{FailureThreshold: 3, SuccessThreshold: 2, DeleteThreshold: 5}, DefaultPolicy())
 	policy := Policy{FailureThreshold: 2, SuccessThreshold: 2, DeleteThreshold: 4}
 	now := time.Date(2026, 3, 21, 12, 0, 0, 0, time.UTC)
 	instance := model.Instance{Status: model.InstanceStatusHealth}

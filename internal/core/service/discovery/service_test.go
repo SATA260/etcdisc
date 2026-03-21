@@ -54,6 +54,7 @@ func TestWatchConvertsStoreEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	watchCh := svc.Watch(ctx, WatchInput{Namespace: "prod-core", Service: "payment-api"})
+	time.Sleep(20 * time.Millisecond)
 
 	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}})
 	require.NoError(t, err)

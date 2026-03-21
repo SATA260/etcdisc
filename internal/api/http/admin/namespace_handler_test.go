@@ -36,4 +36,12 @@ func TestNamespaceAPI(t *testing.T) {
 	api.HandleItem(patchResp, patchReq)
 	require.Equal(t, http.StatusOK, patchResp.Code)
 	require.Contains(t, patchResp.Body.String(), `"accessMode":"read_only"`)
+
+	badResp := httptest.NewRecorder()
+	api.HandleCollection(badResp, httptest.NewRequest(http.MethodPost, "/admin/v1/namespaces", strings.NewReader(`{"name":`)))
+	require.Equal(t, http.StatusBadRequest, badResp.Code)
+
+	methodResp := httptest.NewRecorder()
+	api.HandleItem(methodResp, httptest.NewRequest(http.MethodGet, "/admin/v1/namespaces/prod-core", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, methodResp.Code)
 }

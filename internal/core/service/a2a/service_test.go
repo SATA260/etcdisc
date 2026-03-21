@@ -41,6 +41,36 @@ func TestDiscoverReturnsRuntimeAddressAndProtocolFilter(t *testing.T) {
 	_, err = a2aService.Put(context.Background(), PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"http"}, AuthMode: model.AuthModeStaticToken}, ExpectedRevision: card.Revision + 1})
 	require.Error(t, err)
 	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
+
+	items, err := a2aService.List(context.Background(), "prod-core", false)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+}
+
+func TestPutUpdateRefreshesCapabilityIndexes(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewMemoryStore()
+	nsService := namespacesvc.NewService(store, namespacesvc.NewFixedClock(time.Now()))
+	_, err := nsService.Create(context.Background(), namespacesvc.CreateNamespaceInput{Name: "prod-core"})
+	require.NoError(t, err)
+	registry := registrysvc.NewService(store, nsService, healthsvc.NewManager(), namespacesvc.NewFixedClock(time.Now()))
+	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "agent-api", AgentID: "agent-1", InstanceID: "inst-1", Address: "10.0.0.9", Port: 9090}})
+	require.NoError(t, err)
+	a2aService := NewService(store, nsService, registry, namespacesvc.NewFixedClock(time.Now()))
+
+	card, err := a2aService.Put(context.Background(), PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"grpc"}, AuthMode: model.AuthModeStaticToken}})
+	require.NoError(t, err)
+	updated, err := a2aService.Put(context.Background(), PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.chat"}, Protocols: []string{"grpc"}, AuthMode: model.AuthModeStaticToken}, ExpectedRevision: card.Revision})
+	require.NoError(t, err)
+	require.Greater(t, updated.Revision, card.Revision)
+
+	results, err := a2aService.Discover(context.Background(), DiscoverInput{Namespace: "prod-core", Capability: "tool.search"})
+	require.NoError(t, err)
+	require.Len(t, results, 0)
+	results, err = a2aService.Discover(context.Background(), DiscoverInput{Namespace: "prod-core", Capability: "tool.chat"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
 }
 
 func TestDiscoverDefaultsToHealthyOnly(t *testing.T) {
@@ -65,4 +95,7 @@ func TestDiscoverDefaultsToHealthyOnly(t *testing.T) {
 	results, err = a2aService.Discover(context.Background(), DiscoverInput{Namespace: "prod-core", Capability: "tool.search", IncludeUnhealthy: true})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
+
+	_, err = a2aService.Discover(context.Background(), DiscoverInput{Namespace: "prod-core", Capability: "bad capability"})
+	require.Equal(t, apperrors.CodeInvalidArgument, apperrors.CodeOf(err))
 }
