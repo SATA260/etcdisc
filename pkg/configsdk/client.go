@@ -178,16 +178,16 @@ func NewGRPCTransport(conn grpc.ClientConnInterface) GRPCTransport {
 
 // Effective loads effective config through gRPC.
 func (t GRPCTransport) Effective(ctx context.Context, namespaceName, serviceName string) (map[string]publicapi.EffectiveConfigItem, error) {
-	resp, err := t.Client.GetEffectiveConfig(ctx, &etcdiscv1.ConfigGetRequest{Namespace: namespaceName, Service: serviceName}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	resp, err := t.Client.GetEffectiveConfig(ctx, &etcdiscv1.ConfigGetRequest{Namespace: namespaceName, Service: serviceName})
 	if err != nil {
 		return nil, err
 	}
-	return resp.EffectiveConfig, nil
+	return etcdiscv1.EffectiveConfigMapToPublic(resp.GetEffectiveConfig()), nil
 }
 
 // Watch opens a gRPC server-streaming config watch.
 func (t GRPCTransport) Watch(ctx context.Context, input publicapi.ConfigWatchInput) (<-chan publicapi.WatchEvent, error) {
-	stream, err := t.Client.WatchConfigs(ctx, &etcdiscv1.WatchConfigsRequest{Input: input}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	stream, err := t.Client.WatchConfigs(ctx, &etcdiscv1.WatchConfigsRequest{Input: etcdiscv1.ConfigWatchInputFromPublic(input)})
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (t GRPCTransport) Watch(ctx context.Context, input publicapi.ConfigWatchInp
 			if err != nil {
 				return
 			}
-			out <- *event
+			out <- event.ToPublic()
 		}
 	}()
 	return out, nil

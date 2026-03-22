@@ -12,8 +12,8 @@ import (
 
 // ErrorResponse is the JSON error envelope used by HTTP handlers.
 type ErrorResponse struct {
-	Code    apperrors.Code `json:"code"`
-	Message string         `json:"message"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // DecodeJSON reads a JSON request body into the target structure.
@@ -39,7 +39,7 @@ func WriteJSON(w http.ResponseWriter, status int, payload any) {
 
 // WriteError maps typed application errors to HTTP JSON responses.
 func WriteError(w http.ResponseWriter, err error) {
-	WriteJSON(w, apperrors.HTTPStatusOf(err), ErrorResponse{Code: apperrors.CodeOf(err), Message: apperrors.MessageOf(err)})
+	WriteJSON(w, apperrors.HTTPStatusOf(err), ErrorResponse{Code: string(apperrors.CodeOf(err)), Message: apperrors.MessageOf(err)})
 }
 
 // BeginSSE prepares the response writer for a server-sent events stream.

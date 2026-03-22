@@ -130,7 +130,7 @@ func TestGRPCTransport(t *testing.T) {
 	server := grpcserver.New(grpcserver.Services{Registry: registry, Discovery: discoverysvc.NewService(store, registry), Config: configService, A2A: a2asvc.NewService(store, nsService, registry, clk)})
 	defer server.Stop()
 	go func() { _ = server.Serve(listener) }()
-	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(etcdiscv1.JSONCodecName())))
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -144,7 +144,7 @@ func TestGRPCTransport(t *testing.T) {
 func TestGRPCTransportWatch(t *testing.T) {
 	t.Parallel()
 
-	transport := GRPCTransport{Client: fakeConfigClient{events: []*publicapi.WatchEvent{{Type: publicapi.WatchEventPut, Key: "timeout.request"}}}}
+	transport := GRPCTransport{Client: fakeConfigClient{events: []*etcdiscv1.WatchEvent{{Type: string(publicapi.WatchEventPut), Key: "timeout.request"}}}}
 	watchCh, err := transport.Watch(context.Background(), publicapi.ConfigWatchInput{Namespace: "prod", Service: "pay"})
 	require.NoError(t, err)
 	event := <-watchCh
@@ -152,14 +152,14 @@ func TestGRPCTransportWatch(t *testing.T) {
 	require.Equal(t, "timeout.request", event.Key)
 }
 
-type fakeConfigClient struct{ events []*publicapi.WatchEvent }
+type fakeConfigClient struct{ events []*etcdiscv1.WatchEvent }
 
 func (f fakeConfigClient) GetEffectiveConfig(context.Context, *etcdiscv1.ConfigGetRequest, ...grpc.CallOption) (*etcdiscv1.ConfigGetResponse, error) {
-	return &etcdiscv1.ConfigGetResponse{EffectiveConfig: map[string]publicapi.EffectiveConfigItem{"timeout.request": {Key: "timeout.request", Value: "1000"}}}, nil
+	return &etcdiscv1.ConfigGetResponse{EffectiveConfig: map[string]*etcdiscv1.EffectiveConfigItem{"timeout.request": {Key: "timeout.request", Value: "1000"}}}, nil
 }
 
 func (f fakeConfigClient) PutConfig(context.Context, *etcdiscv1.ConfigPutRequest, ...grpc.CallOption) (*etcdiscv1.ConfigPutResponse, error) {
-	return &etcdiscv1.ConfigPutResponse{Item: publicapi.ConfigItem{Key: "timeout.request"}}, nil
+	return &etcdiscv1.ConfigPutResponse{Item: &etcdiscv1.ConfigItem{Key: "timeout.request"}}, nil
 }
 
 func (f fakeConfigClient) DeleteConfig(context.Context, *etcdiscv1.ConfigDeleteRequest, ...grpc.CallOption) (*etcdiscv1.ConfigDeleteResponse, error) {
@@ -172,7 +172,7 @@ func (f fakeConfigClient) WatchConfigs(context.Context, *etcdiscv1.WatchConfigsR
 
 type fakeConfigWatchClient struct {
 	grpc.ClientStream
-	events []*publicapi.WatchEvent
+	events []*etcdiscv1.WatchEvent
 }
 
 func (f *fakeConfigWatchClient) Header() (metadata.MD, error) { return metadata.MD{}, nil }
@@ -181,7 +181,7 @@ func (f *fakeConfigWatchClient) CloseSend() error             { return nil }
 func (f *fakeConfigWatchClient) Context() context.Context     { return context.Background() }
 func (f *fakeConfigWatchClient) SendMsg(any) error            { return nil }
 func (f *fakeConfigWatchClient) RecvMsg(any) error            { return nil }
-func (f *fakeConfigWatchClient) Recv() (*publicapi.WatchEvent, error) {
+func (f *fakeConfigWatchClient) Recv() (*etcdiscv1.WatchEvent, error) {
 	if len(f.events) == 0 {
 		return nil, io.EOF
 	}

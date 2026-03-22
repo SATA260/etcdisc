@@ -44,57 +44,55 @@ func TestGRPCServer(t *testing.T) {
 	go func() { _ = grpcServer.Serve(listener) }()
 
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithDefaultCallOptions(grpc.CallContentSubtype("json")))
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 
 	registryClient := etcdiscv1.NewRegistryServiceClient(conn)
-	registerResp, err := registryClient.Register(ctx, &etcdiscv1.RegisterRequest{Input: registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}}})
+	registerResp, err := registryClient.Register(ctx, etcdiscv1.NewRegisterRequestFromPublic(registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}}))
 	require.NoError(t, err)
-	require.Equal(t, "node-1", registerResp.Instance.InstanceID)
+	require.Equal(t, "node-1", registerResp.GetInstance().GetInstanceId())
 
 	discoveryClient := etcdiscv1.NewDiscoveryServiceClient(conn)
-	discoverResp, err := discoveryClient.Discover(ctx, &etcdiscv1.DiscoverRequest{Input: discoverysvc.SnapshotInput{Namespace: "prod-core", Service: "payment-api"}})
+	discoverResp, err := discoveryClient.Discover(ctx, etcdiscv1.NewDiscoverRequestFromPublic(discoverysvc.SnapshotInput{Namespace: "prod-core", Service: "payment-api"}))
 	require.NoError(t, err)
-	require.Len(t, discoverResp.Items, 1)
+	require.Len(t, discoverResp.GetItems(), 1)
 
 	configClient := etcdiscv1.NewConfigServiceClient(conn)
-	_, err = configClient.PutConfig(ctx, &etcdiscv1.ConfigPutRequest{Input: configsvc.PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "timeout.request", Value: "1000", ValueType: model.ConfigValueDuration}}})
+	_, err = configClient.PutConfig(ctx, &etcdiscv1.ConfigPutRequest{Input: etcdiscv1.ConfigPutInputFromPublic(configsvc.PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "timeout.request", Value: "1000", ValueType: model.ConfigValueDuration}})})
 	require.NoError(t, err)
 	configResp, err := configClient.GetEffectiveConfig(ctx, &etcdiscv1.ConfigGetRequest{Namespace: "prod-core", Service: "payment-api"})
 	require.NoError(t, err)
-	require.Equal(t, "1000", configResp.EffectiveConfig["timeout.request"].Value)
+	require.Equal(t, "1000", configResp.GetEffectiveConfig()["timeout.request"].GetValue())
 
-	_, err = registryClient.Register(ctx, &etcdiscv1.RegisterRequest{Input: registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "agent-api", AgentID: "agent-1", InstanceID: "inst-1", Address: "10.0.0.9", Port: 9090}}})
+	_, err = registryClient.Register(ctx, etcdiscv1.NewRegisterRequestFromPublic(registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "agent-api", AgentID: "agent-1", InstanceID: "inst-1", Address: "10.0.0.9", Port: 9090}}))
 	require.NoError(t, err)
 	a2aClient := etcdiscv1.NewA2AServiceClient(conn)
-	_, err = a2aClient.UpsertAgentCard(ctx, &etcdiscv1.UpsertAgentCardRequest{Input: a2asvc.PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"grpc"}, AuthMode: model.AuthModeStaticToken}}})
+	_, err = a2aClient.UpsertAgentCard(ctx, &etcdiscv1.UpsertAgentCardRequest{Input: etcdiscv1.AgentCardPutInputFromPublic(a2asvc.PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"grpc"}, AuthMode: model.AuthModeStaticToken}})})
 	require.NoError(t, err)
-	a2aResp, err := a2aClient.DiscoverCapabilities(ctx, &etcdiscv1.DiscoverCapabilitiesRequest{Input: a2asvc.DiscoverInput{Namespace: "prod-core", Capability: "tool.search"}})
+	a2aResp, err := a2aClient.DiscoverCapabilities(ctx, &etcdiscv1.DiscoverCapabilitiesRequest{Input: etcdiscv1.CapabilityDiscoverInputFromPublic(a2asvc.DiscoverInput{Namespace: "prod-core", Capability: "tool.search"})})
 	require.NoError(t, err)
-	require.Len(t, a2aResp.Items, 1)
-	require.Equal(t, "10.0.0.9", a2aResp.Items[0].Address)
+	require.Len(t, a2aResp.GetItems(), 1)
+	require.Equal(t, "10.0.0.9", a2aResp.GetItems()[0].GetAddress())
 
-	updated, err := registryClient.Heartbeat(ctx, &etcdiscv1.HeartbeatRequest{Input: registrysvc.HeartbeatInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1"}})
+	heartbeatResp, err := registryClient.Heartbeat(ctx, etcdiscv1.NewHeartbeatRequestFromPublic(registrysvc.HeartbeatInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1"}))
 	require.NoError(t, err)
-	require.Equal(t, "node-1", updated.Instance.InstanceID)
 	weight := 200
-	updatedInstance, err := registryClient.UpdateInstance(ctx, &etcdiscv1.UpdateInstanceRequest{Input: registrysvc.UpdateInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Weight: &weight, ExpectedRevision: updated.Instance.Revision}})
+	updatedInstance, err := registryClient.UpdateInstance(ctx, &etcdiscv1.UpdateInstanceRequest{Input: etcdiscv1.UpdateInstanceInputFromPublic(registrysvc.UpdateInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Weight: &weight, ExpectedRevision: heartbeatResp.GetInstance().GetRevision()})})
 	require.NoError(t, err)
-	require.Equal(t, 200, updatedInstance.Instance.Weight)
+	require.Equal(t, int32(200), updatedInstance.GetInstance().GetWeight())
 
-	putResp, err := configClient.PutConfig(ctx, &etcdiscv1.ConfigPutRequest{Input: configsvc.PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "retry.count", Value: "3", ValueType: model.ConfigValueInt}}})
+	putResp, err := configClient.PutConfig(ctx, &etcdiscv1.ConfigPutRequest{Input: etcdiscv1.ConfigPutInputFromPublic(configsvc.PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "retry.count", Value: "3", ValueType: model.ConfigValueInt}})})
 	require.NoError(t, err)
+	deleteResp, err := configClient.DeleteConfig(ctx, &etcdiscv1.ConfigDeleteRequest{Input: etcdiscv1.ConfigDeleteInputFromPublic(configsvc.DeleteInput{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "retry.count", ExpectedRevision: putResp.GetItem().GetRevision()})})
+	require.NoError(t, err)
+	require.Equal(t, "deleted", deleteResp.GetStatus())
 
-	deleteResp, err := configClient.DeleteConfig(ctx, &etcdiscv1.ConfigDeleteRequest{Input: configsvc.DeleteInput{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "payment-api", Key: "retry.count", ExpectedRevision: putResp.Item.Revision}})
+	_, err = registryClient.Register(ctx, etcdiscv1.NewRegisterRequestFromPublic(registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2", Address: "127.0.0.2", Port: 8080}}))
 	require.NoError(t, err)
-	require.Equal(t, "deleted", deleteResp.Status)
-
-	_, err = registryClient.Register(ctx, &etcdiscv1.RegisterRequest{Input: registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2", Address: "127.0.0.2", Port: 8080}}})
+	deregisterResp, err := registryClient.Deregister(ctx, etcdiscv1.NewDeregisterRequestFromPublic(registrysvc.DeregisterInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2"}))
 	require.NoError(t, err)
-	deregisterResp, err := registryClient.Deregister(ctx, &etcdiscv1.DeregisterRequest{Input: registrysvc.DeregisterInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2"}})
-	require.NoError(t, err)
-	require.Equal(t, "deleted", deregisterResp.Status)
+	require.Equal(t, "deleted", deregisterResp.GetStatus())
 }
 
 func TestServerStreamingMethodsDirectly(t *testing.T) {
@@ -117,7 +115,7 @@ func TestServerStreamingMethodsDirectly(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	require.NoError(t, srv.WatchInstances(&etcdiscv1.WatchInstancesRequest{Input: discoverysvc.WatchInput{Namespace: "prod-core", Service: "payment-api"}}, instanceStream))
+	require.NoError(t, srv.WatchInstances(&etcdiscv1.WatchInstancesRequest{Input: etcdiscv1.DiscoveryWatchInputFromPublic(discoverysvc.WatchInput{Namespace: "prod-core", Service: "payment-api"})}, instanceStream))
 	require.NotEmpty(t, instanceStream.events)
 
 	watchCtx, cancel = context.WithCancel(context.Background())
@@ -128,7 +126,7 @@ func TestServerStreamingMethodsDirectly(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	require.NoError(t, srv.WatchConfigs(&etcdiscv1.WatchConfigsRequest{Input: configsvc.WatchInput{Namespace: "prod-core", Service: "payment-api"}}, configStream))
+	require.NoError(t, srv.WatchConfigs(&etcdiscv1.WatchConfigsRequest{Input: etcdiscv1.ConfigWatchInputFromPublic(configsvc.WatchInput{Namespace: "prod-core", Service: "payment-api"})}, configStream))
 	require.NotEmpty(t, configStream.events)
 }
 
@@ -140,36 +138,36 @@ func TestServerErrorMapping(t *testing.T) {
 	nsService := namespacesvc.NewService(store, clk)
 	srv := &server{services: Services{Registry: registrysvc.NewService(store, nsService, healthsvc.NewManager(), clk), Discovery: discoverysvc.NewService(store, registrysvc.NewService(store, nsService, healthsvc.NewManager(), clk)), Config: configsvc.NewService(store, nsService, clk), A2A: a2asvc.NewService(store, nsService, registrysvc.NewService(store, nsService, healthsvc.NewManager(), clk), clk)}}
 
-	_, err := srv.Register(context.Background(), &etcdiscv1.RegisterRequest{Input: registrysvc.RegisterInput{Instance: model.Instance{Namespace: "bad", Service: "pay", Address: "127.0.0.1", Port: 8080}}})
+	_, err := srv.Register(context.Background(), etcdiscv1.NewRegisterRequestFromPublic(registrysvc.RegisterInput{Instance: model.Instance{Namespace: "bad", Service: "pay", Address: "127.0.0.1", Port: 8080}}))
 	require.Error(t, err)
-	_, err = srv.Heartbeat(context.Background(), &etcdiscv1.HeartbeatRequest{Input: registrysvc.HeartbeatInput{Namespace: "prod-core", Service: "pay", InstanceID: "missing"}})
+	_, err = srv.Heartbeat(context.Background(), etcdiscv1.NewHeartbeatRequestFromPublic(registrysvc.HeartbeatInput{Namespace: "prod-core", Service: "pay", InstanceID: "missing"}))
 	require.Error(t, err)
-	_, err = srv.UpdateInstance(context.Background(), &etcdiscv1.UpdateInstanceRequest{Input: registrysvc.UpdateInput{Namespace: "prod-core", Service: "pay", InstanceID: "missing"}})
+	_, err = srv.UpdateInstance(context.Background(), &etcdiscv1.UpdateInstanceRequest{Input: etcdiscv1.UpdateInstanceInputFromPublic(registrysvc.UpdateInput{Namespace: "prod-core", Service: "pay", InstanceID: "missing"})})
 	require.Error(t, err)
-	_, err = srv.Deregister(context.Background(), &etcdiscv1.DeregisterRequest{Input: registrysvc.DeregisterInput{Namespace: "prod-core", Service: "pay", InstanceID: "missing"}})
+	_, err = srv.Deregister(context.Background(), etcdiscv1.NewDeregisterRequestFromPublic(registrysvc.DeregisterInput{Namespace: "prod-core", Service: "pay", InstanceID: "missing"}))
 	require.Error(t, err)
-	_, err = srv.Discover(context.Background(), &etcdiscv1.DiscoverRequest{Input: discoverysvc.SnapshotInput{Namespace: "prod-core", Service: "pay"}})
+	_, err = srv.Discover(context.Background(), etcdiscv1.NewDiscoverRequestFromPublic(discoverysvc.SnapshotInput{Namespace: "prod-core", Service: "pay"}))
 	require.Error(t, err)
 	_, err = srv.GetEffectiveConfig(context.Background(), &etcdiscv1.ConfigGetRequest{Namespace: "prod-core", Service: "pay"})
 	require.Error(t, err)
-	_, err = srv.PutConfig(context.Background(), &etcdiscv1.ConfigPutRequest{Input: configsvc.PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "pay", Key: "timeout.request", Value: "1000", ValueType: model.ConfigValueDuration}}})
+	_, err = srv.PutConfig(context.Background(), &etcdiscv1.ConfigPutRequest{Input: etcdiscv1.ConfigPutInputFromPublic(configsvc.PutInput{Item: model.ConfigItem{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "pay", Key: "timeout.request", Value: "1000", ValueType: model.ConfigValueDuration}})})
 	require.Error(t, err)
-	_, err = srv.DeleteConfig(context.Background(), &etcdiscv1.ConfigDeleteRequest{Input: configsvc.DeleteInput{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "pay", Key: "timeout.request", ExpectedRevision: 1}})
+	_, err = srv.DeleteConfig(context.Background(), &etcdiscv1.ConfigDeleteRequest{Input: etcdiscv1.ConfigDeleteInputFromPublic(configsvc.DeleteInput{Scope: model.ConfigScopeService, Namespace: "prod-core", Service: "pay", Key: "timeout.request", ExpectedRevision: 1})})
 	require.Error(t, err)
-	_, err = srv.UpsertAgentCard(context.Background(), &etcdiscv1.UpsertAgentCardRequest{Input: a2asvc.PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"grpc"}, AuthMode: model.AuthModeStaticToken}}})
+	_, err = srv.UpsertAgentCard(context.Background(), &etcdiscv1.UpsertAgentCardRequest{Input: etcdiscv1.AgentCardPutInputFromPublic(a2asvc.PutInput{Card: model.AgentCard{Namespace: "prod-core", AgentID: "agent-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"grpc"}, AuthMode: model.AuthModeStaticToken}})})
 	require.Error(t, err)
-	_, err = srv.DiscoverCapabilities(context.Background(), &etcdiscv1.DiscoverCapabilitiesRequest{Input: a2asvc.DiscoverInput{Namespace: "prod-core", Capability: "tool.search"}})
+	_, err = srv.DiscoverCapabilities(context.Background(), &etcdiscv1.DiscoverCapabilitiesRequest{Input: etcdiscv1.CapabilityDiscoverInputFromPublic(a2asvc.DiscoverInput{Namespace: "prod-core", Capability: "tool.search"})})
 	require.Error(t, err)
 }
 
 type fakeDiscoveryStream struct {
 	grpc.ServerStream
 	ctx    context.Context
-	events []model.WatchEvent
+	events []etcdiscv1.WatchEvent
 }
 
 func (f *fakeDiscoveryStream) Context() context.Context { return f.ctx }
-func (f *fakeDiscoveryStream) Send(event *model.WatchEvent) error {
+func (f *fakeDiscoveryStream) Send(event *etcdiscv1.WatchEvent) error {
 	f.events = append(f.events, *event)
 	return nil
 }
@@ -182,11 +180,11 @@ func (f *fakeDiscoveryStream) RecvMsg(any) error            { return io.EOF }
 type fakeConfigStream struct {
 	grpc.ServerStream
 	ctx    context.Context
-	events []model.WatchEvent
+	events []etcdiscv1.WatchEvent
 }
 
 func (f *fakeConfigStream) Context() context.Context { return f.ctx }
-func (f *fakeConfigStream) Send(event *model.WatchEvent) error {
+func (f *fakeConfigStream) Send(event *etcdiscv1.WatchEvent) error {
 	f.events = append(f.events, *event)
 	return nil
 }

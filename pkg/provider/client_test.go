@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	etcdiscv1 "etcdisc/api/proto/etcdisc/v1"
 	grpcserver "etcdisc/internal/api/grpcserver"
 	registryhttp "etcdisc/internal/api/http/registry"
 	"etcdisc/internal/core/model"
@@ -115,7 +114,7 @@ func TestGRPCTransport(t *testing.T) {
 	server := grpcserver.New(grpcserver.Services{Registry: registry, Discovery: discoverysvc.NewService(store, registry), Config: configsvc.NewService(store, nsService, clk), A2A: a2asvc.NewService(store, nsService, registry, clk)})
 	defer server.Stop()
 	go func() { _ = server.Serve(listener) }()
-	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(etcdiscv1.JSONCodecName())))
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 

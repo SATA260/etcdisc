@@ -14,6 +14,17 @@ type API struct {
 }
 
 // UpsertCard handles AgentCard create and update requests.
+// @Summary Upsert AgentCard
+// @Description Create or update an AgentCard resource.
+// @Tags a2a
+// @Accept json
+// @Produce json
+// @Param request body UpsertCardRequestBody true "AgentCard upsert request"
+// @Success 201 {object} model.AgentCard
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 403 {object} httpx.ErrorResponse
+// @Failure 409 {object} httpx.ErrorResponse
+// @Router /v1/a2a/agentcards [post]
 func (h API) UpsertCard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -33,6 +44,19 @@ func (h API) UpsertCard(w http.ResponseWriter, r *http.Request) {
 }
 
 // Discover handles capability discovery requests.
+// @Summary Discover agents by capability
+// @Description Query AgentCards and runtime instances by exact capability match.
+// @Tags a2a
+// @Produce json
+// @Param namespace query string true "namespace"
+// @Param capability query string true "capability"
+// @Param protocol query string false "protocol"
+// @Param includeUnhealthy query bool false "include unhealthy instances"
+// @Success 200 {object} DiscoverResponse
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 403 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Router /v1/a2a/discovery [get]
 func (h API) Discover(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

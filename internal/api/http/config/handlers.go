@@ -15,6 +15,17 @@ type API struct {
 }
 
 // Effective handles effective config reads.
+// @Summary Get effective config
+// @Description Return effective config after global, namespace, and service overlays are applied.
+// @Tags config
+// @Produce json
+// @Param namespace query string true "namespace"
+// @Param service query string true "service"
+// @Success 200 {object} EffectiveResponse
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 403 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Router /v1/config/effective [get]
 func (h API) Effective(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -29,6 +40,15 @@ func (h API) Effective(w http.ResponseWriter, r *http.Request) {
 }
 
 // Watch handles SSE config watch streams.
+// @Summary Watch config changes
+// @Description Open an SSE stream for config change events.
+// @Tags config
+// @Produce text/event-stream
+// @Param namespace query string true "namespace"
+// @Param service query string true "service"
+// @Param revision query int false "start revision"
+// @Success 200 {string} string "SSE stream"
+// @Router /v1/config/watch [get]
 func (h API) Watch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

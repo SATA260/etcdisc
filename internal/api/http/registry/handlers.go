@@ -14,6 +14,17 @@ type API struct {
 }
 
 // Register handles instance registration.
+// @Summary Register instance
+// @Description Register a runtime service instance.
+// @Tags registry
+// @Accept json
+// @Produce json
+// @Param request body RegisterRequestBody true "register request"
+// @Success 201 {object} model.Instance
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 409 {object} httpx.ErrorResponse
+// @Failure 500 {object} httpx.ErrorResponse
+// @Router /v1/registry/register [post]
 func (h API) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -33,6 +44,17 @@ func (h API) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Heartbeat handles client heartbeats.
+// @Summary Send heartbeat
+// @Description Refresh a heartbeat-mode instance lease and state.
+// @Tags registry
+// @Accept json
+// @Produce json
+// @Param request body HeartbeatRequestBody true "heartbeat request"
+// @Success 200 {object} model.Instance
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Failure 412 {object} httpx.ErrorResponse
+// @Router /v1/registry/heartbeat [post]
 func (h API) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -52,6 +74,17 @@ func (h API) Heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 // Update handles explicit instance updates.
+// @Summary Update instance
+// @Description Update mutable instance fields using expectedRevision CAS semantics.
+// @Tags registry
+// @Accept json
+// @Produce json
+// @Param request body UpdateRequestBody true "update request"
+// @Success 200 {object} model.Instance
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Failure 409 {object} httpx.ErrorResponse
+// @Router /v1/registry/update [post]
 func (h API) Update(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -71,6 +104,16 @@ func (h API) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 // Deregister handles graceful instance removal.
+// @Summary Deregister instance
+// @Description Remove a runtime instance and revoke its lease when present.
+// @Tags registry
+// @Accept json
+// @Produce json
+// @Param request body DeregisterRequestBody true "deregister request"
+// @Success 200 {object} DeleteResponse
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Router /v1/registry/deregister [post]
 func (h API) Deregister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)

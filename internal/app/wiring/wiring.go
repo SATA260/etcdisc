@@ -27,6 +27,7 @@ import (
 	"etcdisc/internal/infra/etcd"
 	"etcdisc/internal/infra/logging"
 	"etcdisc/internal/infra/metrics"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 )
@@ -78,6 +79,7 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 	adminSystemAPI := adminhttp.SystemAPI{Ready: readyCheck, Metrics: metrics.Handler()}
 
 	mux := http.NewServeMux()
+	mux.Handle("/swagger/", httpSwagger.Handler(httpSwagger.URL("/swagger/doc.json")))
 	mux.HandleFunc("/healthz", adminhttp.HealthHandler)
 	mux.Handle("/ready", adminhttp.NewReadyHandler(readyCheck))
 	mux.Handle("/metrics", metrics.Handler())

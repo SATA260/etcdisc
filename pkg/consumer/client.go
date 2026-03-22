@@ -254,16 +254,20 @@ func NewGRPCTransport(conn grpc.ClientConnInterface) GRPCTransport {
 
 // Snapshot performs a gRPC discovery snapshot query.
 func (t GRPCTransport) Snapshot(ctx context.Context, input publicapi.DiscoverySnapshotInput) ([]publicapi.Instance, error) {
-	resp, err := t.Client.Discover(ctx, &etcdiscv1.DiscoverRequest{Input: input}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	resp, err := t.Client.Discover(ctx, etcdiscv1.NewDiscoverRequestFromPublic(input))
 	if err != nil {
 		return nil, err
 	}
-	return resp.Items, nil
+	items := make([]publicapi.Instance, 0, len(resp.GetItems()))
+	for _, item := range resp.GetItems() {
+		items = append(items, item.ToPublic())
+	}
+	return items, nil
 }
 
 // Watch opens a gRPC server-streaming discovery watch.
 func (t GRPCTransport) Watch(ctx context.Context, input publicapi.DiscoveryWatchInput) (<-chan publicapi.WatchEvent, error) {
-	stream, err := t.Client.WatchInstances(ctx, &etcdiscv1.WatchInstancesRequest{Input: input}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	stream, err := t.Client.WatchInstances(ctx, etcdiscv1.NewWatchInstancesRequestFromPublic(input))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +279,7 @@ func (t GRPCTransport) Watch(ctx context.Context, input publicapi.DiscoveryWatch
 			if err != nil {
 				return
 			}
-			out <- *event
+			out <- event.ToPublic()
 		}
 	}()
 	return out, nil

@@ -16,6 +16,20 @@ type API struct {
 }
 
 // Snapshot handles discovery snapshot queries.
+// @Summary List discovered instances
+// @Description Return the current discovery snapshot for a namespace and service.
+// @Tags discovery
+// @Produce json
+// @Param namespace query string true "namespace"
+// @Param service query string true "service"
+// @Param group query string false "group"
+// @Param version query string false "version"
+// @Param healthyOnly query bool false "only return healthy instances"
+// @Success 200 {object} SnapshotResponse
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 403 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Router /v1/discovery/instances [get]
 func (h API) Snapshot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -40,6 +54,16 @@ func (h API) Snapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 // Watch handles SSE instance watch requests.
+// @Summary Watch discovered instances
+// @Description Open an SSE stream for instance watch events.
+// @Tags discovery
+// @Produce text/event-stream
+// @Param namespace query string true "namespace"
+// @Param service query string true "service"
+// @Param healthyOnly query bool false "only stream healthy instances"
+// @Param revision query int false "start revision"
+// @Success 200 {string} string "SSE stream"
+// @Router /v1/discovery/watch [get]
 func (h API) Watch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

@@ -82,24 +82,24 @@ func NewGRPCTransport(conn grpc.ClientConnInterface) GRPCTransport {
 
 // Register performs gRPC registration.
 func (t GRPCTransport) Register(ctx context.Context, input publicapi.RegisterInput) (publicapi.Instance, error) {
-	resp, err := t.Client.Register(ctx, &etcdiscv1.RegisterRequest{Input: input}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	resp, err := t.Client.Register(ctx, etcdiscv1.NewRegisterRequestFromPublic(input))
 	if err != nil {
 		return publicapi.Instance{}, err
 	}
-	return resp.Instance, nil
+	return resp.GetInstance().ToPublic(), nil
 }
 
 // Heartbeat performs a gRPC heartbeat.
 func (t GRPCTransport) Heartbeat(ctx context.Context, input publicapi.HeartbeatInput) (publicapi.Instance, error) {
-	resp, err := t.Client.Heartbeat(ctx, &etcdiscv1.HeartbeatRequest{Input: input}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	resp, err := t.Client.Heartbeat(ctx, etcdiscv1.NewHeartbeatRequestFromPublic(input))
 	if err != nil {
 		return publicapi.Instance{}, err
 	}
-	return resp.Instance, nil
+	return resp.GetInstance().ToPublic(), nil
 }
 
 // Deregister performs a gRPC deregistration.
 func (t GRPCTransport) Deregister(ctx context.Context, input publicapi.DeregisterInput) error {
-	_, err := t.Client.Deregister(ctx, &etcdiscv1.DeregisterRequest{Input: input}, grpc.CallContentSubtype(etcdiscv1.JSONCodecName()))
+	_, err := t.Client.Deregister(ctx, etcdiscv1.NewDeregisterRequestFromPublic(input))
 	return err
 }

@@ -1,0 +1,739 @@
+basePath: /
+definitions:
+  a2a.DiscoverResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/model.A2ADiscoveryResult'
+        type: array
+    type: object
+  a2a.UpsertCardRequestBody:
+    properties:
+      card:
+        $ref: '#/definitions/model.AgentCard'
+    type: object
+  admin.CreateNamespaceRequestBody:
+    properties:
+      name:
+        type: string
+    type: object
+  admin.NamespaceListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/model.Namespace'
+        type: array
+    type: object
+  admin.UpdateNamespaceRequestBody:
+    properties:
+      accessMode:
+        type: string
+      expectedRevision:
+        type: integer
+    type: object
+  config.EffectiveResponse:
+    properties:
+      effectiveConfig:
+        additionalProperties:
+          $ref: '#/definitions/model.EffectiveConfigItem'
+        type: object
+    type: object
+  discovery.SnapshotResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/model.Instance'
+        type: array
+    type: object
+  httpx.ErrorResponse:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  model.A2ADiscoveryResult:
+    properties:
+      address:
+        type: string
+      agentId:
+        type: string
+      authMode:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      namespace:
+        type: string
+      port:
+        type: integer
+      protocols:
+        items:
+          type: string
+        type: array
+      service:
+        type: string
+      status:
+        type: string
+    type: object
+  model.AgentCard:
+    properties:
+      agentId:
+        type: string
+      authMode:
+        type: string
+      capabilities:
+        items:
+          type: string
+        type: array
+      createdAt:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      namespace:
+        type: string
+      protocols:
+        items:
+          type: string
+        type: array
+      revision:
+        type: integer
+      service:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  model.EffectiveConfigItem:
+    properties:
+      key:
+        type: string
+      scope:
+        type: string
+      value:
+        type: string
+      valueType:
+        type: string
+    type: object
+  model.Instance:
+    properties:
+      address:
+        type: string
+      agentId:
+        type: string
+      consecutiveFailures:
+        type: integer
+      consecutiveSuccesses:
+        type: integer
+      createdAt:
+        type: string
+      group:
+        type: string
+      healthCheckMode:
+        type: string
+      instanceId:
+        type: string
+      lastHeartbeatAt:
+        type: string
+      lastProbeAt:
+        type: string
+      leaseId:
+        type: integer
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      namespace:
+        type: string
+      port:
+        type: integer
+      probeConfig:
+        $ref: '#/definitions/model.ProbeConfig'
+      revision:
+        type: integer
+      service:
+        type: string
+      status:
+        type: string
+      statusUpdatedAt:
+        type: string
+      updatedAt:
+        type: string
+      version:
+        type: string
+      weight:
+        type: integer
+    type: object
+  model.Namespace:
+    properties:
+      accessMode:
+        type: string
+      createdAt:
+        type: string
+      name:
+        type: string
+      revision:
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  model.ProbeConfig:
+    properties:
+      address:
+        type: string
+      path:
+        type: string
+      port:
+        type: integer
+    type: object
+  registry.DeleteResponse:
+    properties:
+      status:
+        type: string
+    type: object
+  registry.DeregisterRequestBody:
+    properties:
+      instanceId:
+        type: string
+      namespace:
+        type: string
+      service:
+        type: string
+    type: object
+  registry.HeartbeatRequestBody:
+    properties:
+      instanceId:
+        type: string
+      namespace:
+        type: string
+      service:
+        type: string
+    type: object
+  registry.RegisterRequestBody:
+    properties:
+      instance:
+        $ref: '#/definitions/model.Instance'
+      leaseTTLSeconds:
+        type: integer
+    type: object
+  registry.UpdateRequestBody:
+    properties:
+      expectedRevision:
+        type: integer
+      instanceId:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      namespace:
+        type: string
+      service:
+        type: string
+      version:
+        type: string
+      weight:
+        type: integer
+    type: object
+info:
+  contact:
+    name: etcdisc
+  description: etcdisc phase-1 control plane API for registry, discovery, config,
+    A2A, and admin operations.
+  title: etcdisc HTTP API
+  version: "1.0"
+paths:
+  /admin/v1/namespaces:
+    get:
+      consumes:
+      - application/json
+      description: GET lists namespaces; POST creates a namespace. Requires admin
+        token.
+      parameters:
+      - description: Bearer admin token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: create namespace request
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/admin.CreateNamespaceRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.NamespaceListResponse'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Namespace'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: List or create namespaces
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: GET lists namespaces; POST creates a namespace. Requires admin
+        token.
+      parameters:
+      - description: Bearer admin token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: create namespace request
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/admin.CreateNamespaceRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.NamespaceListResponse'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Namespace'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: List or create namespaces
+      tags:
+      - admin
+  /admin/v1/namespaces/{name}:
+    patch:
+      consumes:
+      - application/json
+      description: Update namespace accessMode using expectedRevision. Requires admin
+        token.
+      parameters:
+      - description: Bearer admin token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: namespace name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: update namespace request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateNamespaceRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Namespace'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Update namespace access mode
+      tags:
+      - admin
+  /v1/a2a/agentcards:
+    post:
+      consumes:
+      - application/json
+      description: Create or update an AgentCard resource.
+      parameters:
+      - description: AgentCard upsert request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/a2a.UpsertCardRequestBody'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.AgentCard'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Upsert AgentCard
+      tags:
+      - a2a
+  /v1/a2a/discovery:
+    get:
+      description: Query AgentCards and runtime instances by exact capability match.
+      parameters:
+      - description: namespace
+        in: query
+        name: namespace
+        required: true
+        type: string
+      - description: capability
+        in: query
+        name: capability
+        required: true
+        type: string
+      - description: protocol
+        in: query
+        name: protocol
+        type: string
+      - description: include unhealthy instances
+        in: query
+        name: includeUnhealthy
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/a2a.DiscoverResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Discover agents by capability
+      tags:
+      - a2a
+  /v1/config/effective:
+    get:
+      description: Return effective config after global, namespace, and service overlays
+        are applied.
+      parameters:
+      - description: namespace
+        in: query
+        name: namespace
+        required: true
+        type: string
+      - description: service
+        in: query
+        name: service
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.EffectiveResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Get effective config
+      tags:
+      - config
+  /v1/config/watch:
+    get:
+      description: Open an SSE stream for config change events.
+      parameters:
+      - description: namespace
+        in: query
+        name: namespace
+        required: true
+        type: string
+      - description: service
+        in: query
+        name: service
+        required: true
+        type: string
+      - description: start revision
+        in: query
+        name: revision
+        type: integer
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+      summary: Watch config changes
+      tags:
+      - config
+  /v1/discovery/instances:
+    get:
+      description: Return the current discovery snapshot for a namespace and service.
+      parameters:
+      - description: namespace
+        in: query
+        name: namespace
+        required: true
+        type: string
+      - description: service
+        in: query
+        name: service
+        required: true
+        type: string
+      - description: group
+        in: query
+        name: group
+        type: string
+      - description: version
+        in: query
+        name: version
+        type: string
+      - description: only return healthy instances
+        in: query
+        name: healthyOnly
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/discovery.SnapshotResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: List discovered instances
+      tags:
+      - discovery
+  /v1/discovery/watch:
+    get:
+      description: Open an SSE stream for instance watch events.
+      parameters:
+      - description: namespace
+        in: query
+        name: namespace
+        required: true
+        type: string
+      - description: service
+        in: query
+        name: service
+        required: true
+        type: string
+      - description: only stream healthy instances
+        in: query
+        name: healthyOnly
+        type: boolean
+      - description: start revision
+        in: query
+        name: revision
+        type: integer
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+      summary: Watch discovered instances
+      tags:
+      - discovery
+  /v1/registry/deregister:
+    post:
+      consumes:
+      - application/json
+      description: Remove a runtime instance and revoke its lease when present.
+      parameters:
+      - description: deregister request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/registry.DeregisterRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/registry.DeleteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Deregister instance
+      tags:
+      - registry
+  /v1/registry/heartbeat:
+    post:
+      consumes:
+      - application/json
+      description: Refresh a heartbeat-mode instance lease and state.
+      parameters:
+      - description: heartbeat request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/registry.HeartbeatRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Instance'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "412":
+          description: Precondition Failed
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Send heartbeat
+      tags:
+      - registry
+  /v1/registry/register:
+    post:
+      consumes:
+      - application/json
+      description: Register a runtime service instance.
+      parameters:
+      - description: register request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/registry.RegisterRequestBody'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Instance'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Register instance
+      tags:
+      - registry
+  /v1/registry/update:
+    post:
+      consumes:
+      - application/json
+      description: Update mutable instance fields using expectedRevision CAS semantics.
+      parameters:
+      - description: update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/registry.UpdateRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Instance'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpx.ErrorResponse'
+      summary: Update instance
+      tags:
+      - registry
+schemes:
+- http
+swagger: "2.0"

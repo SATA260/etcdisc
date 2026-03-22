@@ -142,7 +142,7 @@ func TestGRPCTransport(t *testing.T) {
 	server := grpcserver.New(grpcserver.Services{Registry: registry, Discovery: discoverysvc.NewService(store, registry), Config: configsvc.NewService(store, nsService, clk), A2A: a2asvc.NewService(store, nsService, registry, clk)})
 	defer server.Stop()
 	go func() { _ = server.Serve(listener) }()
-	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithDefaultCallOptions(grpc.CallContentSubtype(etcdiscv1.JSONCodecName())))
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -155,7 +155,7 @@ func TestGRPCTransport(t *testing.T) {
 func TestGRPCTransportWatch(t *testing.T) {
 	t.Parallel()
 
-	transport := GRPCTransport{Client: fakeDiscoveryClient{events: []*publicapi.WatchEvent{{Type: publicapi.WatchEventPut, Key: "node-1"}}}}
+	transport := GRPCTransport{Client: fakeDiscoveryClient{events: []*etcdiscv1.WatchEvent{{Type: string(publicapi.WatchEventPut), Key: "node-1"}}}}
 	watchCh, err := transport.Watch(context.Background(), publicapi.DiscoveryWatchInput{Namespace: "prod", Service: "pay"})
 	require.NoError(t, err)
 	event := <-watchCh
@@ -163,10 +163,10 @@ func TestGRPCTransportWatch(t *testing.T) {
 	require.Equal(t, "node-1", event.Key)
 }
 
-type fakeDiscoveryClient struct{ events []*publicapi.WatchEvent }
+type fakeDiscoveryClient struct{ events []*etcdiscv1.WatchEvent }
 
 func (f fakeDiscoveryClient) Discover(context.Context, *etcdiscv1.DiscoverRequest, ...grpc.CallOption) (*etcdiscv1.DiscoverResponse, error) {
-	return &etcdiscv1.DiscoverResponse{Items: []publicapi.Instance{{InstanceID: "node-1"}}}, nil
+	return &etcdiscv1.DiscoverResponse{Items: []*etcdiscv1.Instance{{InstanceId: "node-1"}}}, nil
 }
 
 func (f fakeDiscoveryClient) WatchInstances(context.Context, *etcdiscv1.WatchInstancesRequest, ...grpc.CallOption) (etcdiscv1.DiscoveryService_WatchInstancesClient, error) {
@@ -175,7 +175,7 @@ func (f fakeDiscoveryClient) WatchInstances(context.Context, *etcdiscv1.WatchIns
 
 type fakeDiscoveryWatchClient struct {
 	grpc.ClientStream
-	events []*publicapi.WatchEvent
+	events []*etcdiscv1.WatchEvent
 }
 
 func (f *fakeDiscoveryWatchClient) Header() (metadata.MD, error) { return metadata.MD{}, nil }
@@ -184,7 +184,7 @@ func (f *fakeDiscoveryWatchClient) CloseSend() error             { return nil }
 func (f *fakeDiscoveryWatchClient) Context() context.Context     { return context.Background() }
 func (f *fakeDiscoveryWatchClient) SendMsg(any) error            { return nil }
 func (f *fakeDiscoveryWatchClient) RecvMsg(any) error            { return nil }
-func (f *fakeDiscoveryWatchClient) Recv() (*publicapi.WatchEvent, error) {
+func (f *fakeDiscoveryWatchClient) Recv() (*etcdiscv1.WatchEvent, error) {
 	if len(f.events) == 0 {
 		return nil, io.EOF
 	}

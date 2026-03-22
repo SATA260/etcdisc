@@ -1,7 +1,7 @@
 GO ?= go
 COMPOSE ?= docker compose
 
-.PHONY: run test fmt up down integration
+.PHONY: run test fmt up down integration proto
 
 run:
 	$(GO) run ./cmd/etcdisc-server
@@ -14,6 +14,9 @@ integration:
 
 fmt:
 	$(GO) fmt ./...
+
+proto:
+	sh scripts/gen_proto.sh
 
 up:
 	$(COMPOSE) -f deployments/docker-compose/docker-compose.yml up --build

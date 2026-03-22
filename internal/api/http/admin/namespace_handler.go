@@ -18,6 +18,20 @@ type NamespaceAPI struct {
 }
 
 // HandleCollection serves namespace create and list operations.
+// @Summary List or create namespaces
+// @Description GET lists namespaces; POST creates a namespace. Requires admin token.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param Authorization header string true "Bearer admin token"
+// @Param request body CreateNamespaceRequestBody false "create namespace request"
+// @Success 200 {object} NamespaceListResponse
+// @Success 201 {object} model.Namespace
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 401 {object} httpx.ErrorResponse
+// @Failure 409 {object} httpx.ErrorResponse
+// @Router /admin/v1/namespaces [get]
+// @Router /admin/v1/namespaces [post]
 func (h NamespaceAPI) HandleCollection(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -46,6 +60,20 @@ func (h NamespaceAPI) HandleCollection(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleItem serves namespace access-mode updates.
+// @Summary Update namespace access mode
+// @Description Update namespace accessMode using expectedRevision. Requires admin token.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param Authorization header string true "Bearer admin token"
+// @Param name path string true "namespace name"
+// @Param request body UpdateNamespaceRequestBody true "update namespace request"
+// @Success 200 {object} model.Namespace
+// @Failure 400 {object} httpx.ErrorResponse
+// @Failure 401 {object} httpx.ErrorResponse
+// @Failure 404 {object} httpx.ErrorResponse
+// @Failure 409 {object} httpx.ErrorResponse
+// @Router /admin/v1/namespaces/{name} [patch]
 func (h NamespaceAPI) HandleItem(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		w.WriteHeader(http.StatusMethodNotAllowed)

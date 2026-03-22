@@ -4,9 +4,228 @@ package etcdisc.v1;
 
 option go_package = "etcdisc/api/proto/etcdisc/v1;etcdiscv1";
 
-// This proto documents the phase 1 gRPC surface implemented by the JSON codec based server.
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
-service RegistryService {}
-service DiscoveryService {}
-service ConfigService {}
-service A2AService {}
+message ProbeConfig {
+  string address = 1;
+  int32 port = 2;
+  string path = 3;
+}
+
+message Namespace {
+  string name = 1;
+  string access_mode = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  int64 revision = 5;
+}
+
+message Instance {
+  string namespace = 1;
+  string service = 2;
+  string group = 3;
+  string version = 4;
+  int32 weight = 5;
+  string instance_id = 6;
+  string agent_id = 7;
+  string address = 8;
+  int32 port = 9;
+  map<string, string> metadata = 10;
+  string health_check_mode = 11;
+  ProbeConfig probe_config = 12;
+  string status = 13;
+  int64 lease_id = 14;
+  int32 consecutive_failures = 15;
+  int32 consecutive_successes = 16;
+  google.protobuf.Timestamp last_heartbeat_at = 17;
+  google.protobuf.Timestamp last_probe_at = 18;
+  google.protobuf.Timestamp created_at = 19;
+  google.protobuf.Timestamp updated_at = 20;
+  google.protobuf.Timestamp status_updated_at = 21;
+  int64 revision = 22;
+}
+
+message ConfigItem {
+  string namespace = 1;
+  string service = 2;
+  string scope = 3;
+  string key = 4;
+  string value = 5;
+  string value_type = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  int64 revision = 9;
+}
+
+message EffectiveConfigItem {
+  string key = 1;
+  string value = 2;
+  string value_type = 3;
+  string scope = 4;
+}
+
+message AgentCard {
+  string namespace = 1;
+  string agent_id = 2;
+  string service = 3;
+  repeated string capabilities = 4;
+  repeated string protocols = 5;
+  string auth_mode = 6;
+  map<string, string> metadata = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  int64 revision = 10;
+}
+
+message A2ADiscoveryResult {
+  string namespace = 1;
+  string agent_id = 2;
+  string service = 3;
+  string address = 4;
+  int32 port = 5;
+  repeated string protocols = 6;
+  string auth_mode = 7;
+  map<string, string> metadata = 8;
+  string status = 9;
+}
+
+message WatchEvent {
+  string type = 1;
+  string resource = 2;
+  string key = 3;
+  int64 revision = 4;
+  bytes value = 5;
+}
+
+message RegisterInput {
+  Instance instance = 1;
+  int64 lease_ttl_seconds = 2;
+}
+
+message HeartbeatInput {
+  string namespace = 1;
+  string service = 2;
+  string instance_id = 3;
+}
+
+message UpdateInstanceInput {
+  string namespace = 1;
+  string service = 2;
+  string instance_id = 3;
+  google.protobuf.Int32Value weight = 4;
+  map<string, string> metadata = 5;
+  google.protobuf.StringValue version = 6;
+  int64 expected_revision = 7;
+}
+
+message DeregisterInput {
+  string namespace = 1;
+  string service = 2;
+  string instance_id = 3;
+}
+
+message DiscoverySnapshotInput {
+  string namespace = 1;
+  string service = 2;
+  string group = 3;
+  string version = 4;
+  map<string, string> metadata = 5;
+  google.protobuf.BoolValue healthy_only = 6;
+}
+
+message DiscoveryWatchInput {
+  string namespace = 1;
+  string service = 2;
+  google.protobuf.BoolValue healthy_only = 3;
+  int64 revision = 4;
+}
+
+message ConfigPutInput {
+  ConfigItem item = 1;
+  int64 expected_revision = 2;
+}
+
+message ConfigDeleteInput {
+  string scope = 1;
+  string namespace = 2;
+  string service = 3;
+  string key = 4;
+  int64 expected_revision = 5;
+}
+
+message ConfigWatchInput {
+  string namespace = 1;
+  string service = 2;
+  int64 revision = 3;
+}
+
+message AgentCardPutInput {
+  AgentCard card = 1;
+  int64 expected_revision = 2;
+}
+
+message CapabilityDiscoverInput {
+  string namespace = 1;
+  string capability = 2;
+  string protocol = 3;
+  google.protobuf.BoolValue include_unhealthy = 4;
+}
+
+message RegisterRequest { RegisterInput input = 1; }
+message RegisterResponse { Instance instance = 1; }
+
+message HeartbeatRequest { HeartbeatInput input = 1; }
+message HeartbeatResponse { Instance instance = 1; }
+
+message UpdateInstanceRequest { UpdateInstanceInput input = 1; }
+message UpdateInstanceResponse { Instance instance = 1; }
+
+message DeregisterRequest { DeregisterInput input = 1; }
+message DeregisterResponse { string status = 1; }
+
+message DiscoverRequest { DiscoverySnapshotInput input = 1; }
+message DiscoverResponse { repeated Instance items = 1; }
+message WatchInstancesRequest { DiscoveryWatchInput input = 1; }
+
+message ConfigGetRequest {
+  string namespace = 1;
+  string service = 2;
+}
+message ConfigGetResponse {
+  map<string, EffectiveConfigItem> effective_config = 1;
+}
+message ConfigPutRequest { ConfigPutInput input = 1; }
+message ConfigPutResponse { ConfigItem item = 1; }
+message ConfigDeleteRequest { ConfigDeleteInput input = 1; }
+message ConfigDeleteResponse { string status = 1; }
+message WatchConfigsRequest { ConfigWatchInput input = 1; }
+
+message UpsertAgentCardRequest { AgentCardPutInput input = 1; }
+message UpsertAgentCardResponse { AgentCard card = 1; }
+message DiscoverCapabilitiesRequest { CapabilityDiscoverInput input = 1; }
+message DiscoverCapabilitiesResponse { repeated A2ADiscoveryResult items = 1; }
+
+service RegistryService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc UpdateInstance(UpdateInstanceRequest) returns (UpdateInstanceResponse);
+  rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+}
+
+service DiscoveryService {
+  rpc Discover(DiscoverRequest) returns (DiscoverResponse);
+  rpc WatchInstances(WatchInstancesRequest) returns (stream WatchEvent);
+}
+
+service ConfigService {
+  rpc GetEffectiveConfig(ConfigGetRequest) returns (ConfigGetResponse);
+  rpc PutConfig(ConfigPutRequest) returns (ConfigPutResponse);
+  rpc DeleteConfig(ConfigDeleteRequest) returns (ConfigDeleteResponse);
+  rpc WatchConfigs(WatchConfigsRequest) returns (stream WatchEvent);
+}
+
+service A2AService {
+  rpc UpsertAgentCard(UpsertAgentCardRequest) returns (UpsertAgentCardResponse);
+  rpc DiscoverCapabilities(DiscoverCapabilitiesRequest) returns (DiscoverCapabilitiesResponse);
+}
