@@ -30,6 +30,7 @@ import (
 	"etcdisc/internal/infra/logging"
 	"etcdisc/internal/infra/metrics"
 	"etcdisc/internal/runtime/cluster"
+	"etcdisc/internal/runtime/healthscheduler"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
@@ -43,12 +44,18 @@ type Dependencies struct {
 	ETCDClient *clientv3.Client
 	ReadyCheck adminhttp.ReadyCheck
 	Cluster    *cluster.Coordinator
+	Heartbeat  *healthscheduler.HeartbeatSupervisor
 }
 
 // Close releases opened infrastructure clients.
 func (d Dependencies) Close() error {
 	if d.Cluster != nil {
 		if err := d.Cluster.Close(); err != nil {
+			return err
+		}
+	}
+	if d.Heartbeat != nil {
+		if err := d.Heartbeat.Close(); err != nil {
 			return err
 		}
 	}
@@ -76,6 +83,7 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 	a2aService := a2asvc.NewService(store, namespaceService, registryService, clk)
 	readyCheck := func(ctx context.Context) error { return store.Status(ctx) }
 	var runtimeCluster *cluster.Coordinator
+	var heartbeatSupervisor *healthscheduler.HeartbeatSupervisor
 	if cfg.Cluster.Enabled {
 		runtimeCluster, err = cluster.NewCoordinator(store, logger, clk, cluster.Config{
 			Enabled:                 cfg.Cluster.Enabled,
@@ -94,6 +102,8 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 			return Dependencies{}, err
 		}
 		registryService.SetIngressRecorder(runtimeCluster)
+		heartbeatSupervisor = healthscheduler.NewHeartbeatSupervisor(store, registryService, runtimeCluster, clk, logger)
+		heartbeatSupervisor.Start()
 	}
 
 	registryAPI := registryhttp.API{Service: registryService}
@@ -148,6 +158,7 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 		ETCDClient: etcdClient,
 		ReadyCheck: readyCheck,
 		Cluster:    runtimeCluster,
+		Heartbeat:  heartbeatSupervisor,
 	}, nil
 }
 

@@ -3,12 +3,14 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	apperrors "etcdisc/internal/core/errors"
+	"etcdisc/internal/core/keyspace"
 	"etcdisc/internal/core/model"
 	healthsvc "etcdisc/internal/core/service/health"
 	namespacesvc "etcdisc/internal/core/service/namespace"
@@ -138,20 +140,22 @@ func TestApplyProbeResultTransitionsAndDeletes(t *testing.T) {
 
 	registered, err := svc.Register(context.Background(), RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080, HealthCheckMode: model.HealthCheckTCPProbe}})
 	require.NoError(t, err)
+	seedOwner(t, store, model.ServiceOwner{Namespace: "prod-core", Service: "payment-api", OwnerNodeID: "node-1", Epoch: 1})
 
 	policy := &healthsvc.Policy{FailureThreshold: 2, SuccessThreshold: 2, DeleteThreshold: 4}
-	instance, deleted, err := svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy})
+	instance, deleted, err := svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy, ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: 1})
 	require.NoError(t, err)
 	require.False(t, deleted)
 	require.Equal(t, model.InstanceStatusHealth, instance.Status)
 
-	instance, deleted, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy})
+	instance, deleted, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy, ExpectedRevision: instance.Revision, ExpectedOwnerEpoch: 1})
 	require.NoError(t, err)
 	require.False(t, deleted)
 	require.Equal(t, model.InstanceStatusUnhealth, instance.Status)
 
-	_, _, _ = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy})
-	_, deleted, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy})
+	instance, _, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy, ExpectedRevision: instance.Revision, ExpectedOwnerEpoch: 1})
+	require.NoError(t, err)
+	_, deleted, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: registered.Namespace, Service: registered.Service, InstanceID: registered.InstanceID, Success: false, PolicyOverride: policy, ExpectedRevision: instance.Revision, ExpectedOwnerEpoch: 1})
 	require.NoError(t, err)
 	require.True(t, deleted)
 
@@ -159,6 +163,38 @@ func TestApplyProbeResultTransitionsAndDeletes(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: heartbeatInstance.Namespace, Service: heartbeatInstance.Service, InstanceID: heartbeatInstance.InstanceID, Success: false})
 	require.Equal(t, apperrors.CodeFailedPrecondition, apperrors.CodeOf(err))
+}
+
+func TestApplyHeartbeatTimeoutTransitionsAndOwnerEpoch(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewMemoryStore()
+	registerClock := namespacesvc.NewFixedClock(time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC))
+	nsService := namespacesvc.NewService(store, registerClock)
+	_, err := nsService.Create(context.Background(), namespacesvc.CreateNamespaceInput{Name: "prod-core"})
+	require.NoError(t, err)
+	registerSvc := NewService(store, nsService, nil, registerClock)
+	registered, err := registerSvc.Register(context.Background(), RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}})
+	require.NoError(t, err)
+	seedOwner(t, store, model.ServiceOwner{Namespace: "prod-core", Service: "payment-api", OwnerNodeID: "node-1", Epoch: 3})
+
+	timeoutSvc := NewService(store, nsService, nil, namespacesvc.NewFixedClock(time.Date(2026, 3, 23, 10, 0, 20, 0, time.UTC)))
+	instance, deleted, err := timeoutSvc.ApplyHeartbeatTimeout(context.Background(), HeartbeatTimeoutInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: 3})
+	require.NoError(t, err)
+	require.False(t, deleted)
+	require.Equal(t, model.InstanceStatusUnhealth, instance.Status)
+
+	deleteSvc := NewService(store, nsService, nil, namespacesvc.NewFixedClock(time.Date(2026, 3, 23, 10, 0, 50, 0, time.UTC)))
+	_, deleted, err = deleteSvc.ApplyHeartbeatTimeout(context.Background(), HeartbeatTimeoutInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", ExpectedRevision: instance.Revision, ExpectedOwnerEpoch: 3})
+	require.NoError(t, err)
+	require.True(t, deleted)
+	_, err = deleteSvc.Get(context.Background(), "prod-core", "payment-api", "node-1")
+	require.Equal(t, apperrors.CodeNotFound, apperrors.CodeOf(err))
+
+	registered, err = registerSvc.Register(context.Background(), RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2", Address: "127.0.0.2", Port: 8081}})
+	require.NoError(t, err)
+	_, _, err = timeoutSvc.ApplyHeartbeatTimeout(context.Background(), HeartbeatTimeoutInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2", ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: 4})
+	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
 }
 
 func TestListFiltersByHealthyStateAndMetadata(t *testing.T) {
@@ -200,4 +236,12 @@ func TestDeregisterRemovesInstance(t *testing.T) {
 	_, err = svc.Get(context.Background(), registered.Namespace, registered.Service, registered.InstanceID)
 	require.Error(t, err)
 	require.Equal(t, apperrors.CodeNotFound, apperrors.CodeOf(err))
+}
+
+func seedOwner(t *testing.T, store *testkit.MemoryStore, owner model.ServiceOwner) {
+	t.Helper()
+	payload, err := json.Marshal(owner)
+	require.NoError(t, err)
+	_, err = store.Put(context.Background(), keyspace.ServiceOwnerKey(owner.Namespace, owner.Service), payload, 0)
+	require.NoError(t, err)
 }

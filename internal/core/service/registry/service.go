@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	apperrors "etcdisc/internal/core/errors"
 	"etcdisc/internal/core/keyspace"
@@ -66,11 +67,34 @@ type DeregisterInput struct {
 
 // ProbeResultInput contains one probe outcome for one instance.
 type ProbeResultInput struct {
-	Namespace      string            `json:"namespace"`
-	Service        string            `json:"service"`
-	InstanceID     string            `json:"instanceId"`
-	Success        bool              `json:"success"`
-	PolicyOverride *healthsvc.Policy `json:"policyOverride,omitempty"`
+	Namespace          string            `json:"namespace"`
+	Service            string            `json:"service"`
+	InstanceID         string            `json:"instanceId"`
+	Success            bool              `json:"success"`
+	PolicyOverride     *healthsvc.Policy `json:"policyOverride,omitempty"`
+	ExpectedRevision   int64             `json:"expectedRevision,omitempty"`
+	ExpectedOwnerEpoch int64             `json:"expectedOwnerEpoch,omitempty"`
+}
+
+// HeartbeatPolicy defines timeout windows for heartbeat driven state transitions.
+type HeartbeatPolicy struct {
+	UnhealthyAfter time.Duration
+	DeleteAfter    time.Duration
+}
+
+// DefaultHeartbeatPolicy returns the default heartbeat timeout windows.
+func DefaultHeartbeatPolicy() HeartbeatPolicy {
+	return HeartbeatPolicy{UnhealthyAfter: 15 * time.Second, DeleteAfter: 45 * time.Second}
+}
+
+// HeartbeatTimeoutInput identifies one heartbeat timeout evaluation target.
+type HeartbeatTimeoutInput struct {
+	Namespace          string          `json:"namespace"`
+	Service            string          `json:"service"`
+	InstanceID         string          `json:"instanceId"`
+	ExpectedRevision   int64           `json:"expectedRevision"`
+	ExpectedOwnerEpoch int64           `json:"expectedOwnerEpoch"`
+	PolicyOverride     HeartbeatPolicy `json:"policyOverride,omitempty"`
 }
 
 // ListFilter selects instances for discovery and management views.
@@ -227,6 +251,58 @@ func (s *Service) Heartbeat(ctx context.Context, input HeartbeatInput) (model.In
 	return instance, nil
 }
 
+// ApplyHeartbeatTimeout updates heartbeat-mode instance state according to timeout windows using owner fencing and CAS.
+func (s *Service) ApplyHeartbeatTimeout(ctx context.Context, input HeartbeatTimeoutInput) (model.Instance, bool, error) {
+	instance, err := s.Get(ctx, input.Namespace, input.Service, input.InstanceID)
+	if err != nil {
+		return model.Instance{}, false, err
+	}
+	if instance.HealthCheckMode != model.HealthCheckHeartbeat {
+		return model.Instance{}, false, apperrors.New(apperrors.CodeFailedPrecondition, "heartbeat timeout is only valid for heartbeat mode instances")
+	}
+	if input.ExpectedOwnerEpoch <= 0 {
+		return model.Instance{}, false, apperrors.New(apperrors.CodeInvalidArgument, "expectedOwnerEpoch must be greater than zero")
+	}
+	if err := s.ensureOwnerEpoch(ctx, input.Namespace, input.Service, input.ExpectedOwnerEpoch); err != nil {
+		return model.Instance{}, false, err
+	}
+	if input.ExpectedRevision > 0 && instance.Revision != input.ExpectedRevision {
+		return model.Instance{}, false, apperrors.New(apperrors.CodeConflict, "instance revision changed before heartbeat timeout apply")
+	}
+	policy := input.PolicyOverride
+	if policy.UnhealthyAfter <= 0 || policy.DeleteAfter <= 0 {
+		policy = DefaultHeartbeatPolicy()
+	}
+	now := s.clock.Now()
+	since := now.Sub(instance.LastHeartbeatAt)
+	if since < policy.UnhealthyAfter {
+		return instance, false, nil
+	}
+	if since >= policy.DeleteAfter {
+		_, err := s.store.DeleteCAS(ctx, keyspace.InstanceKey(input.Namespace, input.Service, input.InstanceID), instance.Revision)
+		if err != nil {
+			return model.Instance{}, false, err
+		}
+		return instance, true, nil
+	}
+	if instance.Status == model.InstanceStatusUnhealth {
+		return instance, false, nil
+	}
+	instance.Status = model.InstanceStatusUnhealth
+	instance.StatusUpdatedAt = now
+	instance.UpdatedAt = now
+	payload, err := json.Marshal(instance)
+	if err != nil {
+		return model.Instance{}, false, apperrors.Wrap(apperrors.CodeInternal, "marshal instance failed", err)
+	}
+	revision, err := s.store.CAS(ctx, keyspace.InstanceKey(input.Namespace, input.Service, input.InstanceID), instance.Revision, payload, port.LeaseID(instance.LeaseID))
+	if err != nil {
+		return model.Instance{}, false, err
+	}
+	instance.Revision = revision
+	return instance, false, nil
+}
+
 // Deregister removes a runtime instance and revokes its lease when present.
 func (s *Service) Deregister(ctx context.Context, input DeregisterInput) error {
 	if err := s.namespaces.CheckWrite(ctx, input.Namespace, false); err != nil {
@@ -254,20 +330,28 @@ func (s *Service) ApplyProbeResult(ctx context.Context, input ProbeResultInput) 
 	if !instance.HealthCheckMode.IsProbe() {
 		return model.Instance{}, false, apperrors.New(apperrors.CodeFailedPrecondition, "probe result is only valid for probe mode instances")
 	}
+	if input.ExpectedOwnerEpoch > 0 {
+		if err := s.ensureOwnerEpoch(ctx, input.Namespace, input.Service, input.ExpectedOwnerEpoch); err != nil {
+			return model.Instance{}, false, err
+		}
+	}
+	if input.ExpectedRevision > 0 && instance.Revision != input.ExpectedRevision {
+		return model.Instance{}, false, apperrors.New(apperrors.CodeConflict, "instance revision changed before probe apply")
+	}
 	policy := healthsvc.DefaultPolicy()
 	if input.PolicyOverride != nil {
 		policy = *input.PolicyOverride
 	}
 	instance, shouldDelete := s.health.ApplyProbeResult(instance, input.Success, s.clock.Now(), policy)
 	if shouldDelete {
-		_, err := s.store.Delete(ctx, keyspace.InstanceKey(input.Namespace, input.Service, input.InstanceID))
+		_, err := s.store.DeleteCAS(ctx, keyspace.InstanceKey(input.Namespace, input.Service, input.InstanceID), instance.Revision)
 		return instance, true, err
 	}
 	payload, err := json.Marshal(instance)
 	if err != nil {
 		return model.Instance{}, false, apperrors.Wrap(apperrors.CodeInternal, "marshal instance failed", err)
 	}
-	revision, err := s.store.Put(ctx, keyspace.InstanceKey(input.Namespace, input.Service, input.InstanceID), payload, 0)
+	revision, err := s.store.CAS(ctx, keyspace.InstanceKey(input.Namespace, input.Service, input.InstanceID), instance.Revision, payload, 0)
 	if err != nil {
 		return model.Instance{}, false, err
 	}
@@ -333,6 +417,21 @@ func matchesMetadata(instanceMetadata, expected map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (s *Service) ensureOwnerEpoch(ctx context.Context, namespaceName, serviceName string, expectedEpoch int64) error {
+	record, err := s.store.Get(ctx, keyspace.ServiceOwnerKey(namespaceName, serviceName))
+	if err != nil {
+		return err
+	}
+	var owner model.ServiceOwner
+	if err := json.Unmarshal(record.Value, &owner); err != nil {
+		return apperrors.Wrap(apperrors.CodeInternal, "unmarshal service owner failed", err)
+	}
+	if owner.Epoch != expectedEpoch {
+		return apperrors.New(apperrors.CodeConflict, "service owner epoch changed")
+	}
+	return nil
 }
 
 func (s *Service) newInstanceID(serviceName string) string {
