@@ -195,6 +195,26 @@ func TestApplyHeartbeatTimeoutTransitionsAndOwnerEpoch(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = timeoutSvc.ApplyHeartbeatTimeout(context.Background(), HeartbeatTimeoutInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2", ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: 4})
 	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
+	_, _, err = timeoutSvc.ApplyHeartbeatTimeout(context.Background(), HeartbeatTimeoutInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-2", ExpectedRevision: registered.Revision + 10, ExpectedOwnerEpoch: 3})
+	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
+}
+
+func TestApplyProbeResultRejectsOwnerEpochAndRevisionConflicts(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewMemoryStore()
+	nsService := namespacesvc.NewService(store, namespacesvc.NewFixedClock(time.Now()))
+	_, err := nsService.Create(context.Background(), namespacesvc.CreateNamespaceInput{Name: "prod-core"})
+	require.NoError(t, err)
+	svc := NewService(store, nsService, nil, namespacesvc.NewFixedClock(time.Now()))
+	registered, err := svc.Register(context.Background(), RegisterInput{Instance: model.Instance{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080, HealthCheckMode: model.HealthCheckTCPProbe}})
+	require.NoError(t, err)
+	seedOwner(t, store, model.ServiceOwner{Namespace: "prod-core", Service: "payment-api", OwnerNodeID: "node-1", Epoch: 5})
+
+	_, _, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Success: false, ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: 6})
+	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
+	_, _, err = svc.ApplyProbeResult(context.Background(), ProbeResultInput{Namespace: "prod-core", Service: "payment-api", InstanceID: "node-1", Success: false, ExpectedRevision: registered.Revision + 1, ExpectedOwnerEpoch: 5})
+	require.Equal(t, apperrors.CodeConflict, apperrors.CodeOf(err))
 }
 
 func TestListFiltersByHealthyStateAndMetadata(t *testing.T) {
