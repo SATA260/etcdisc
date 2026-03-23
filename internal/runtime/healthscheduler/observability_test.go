@@ -33,6 +33,9 @@ func TestRuntimeMetricsAreExposed(t *testing.T) {
 		"etcdisc_runtime_revision_conflict_total",
 		"etcdisc_runtime_rebuild_total",
 		"etcdisc_runtime_reconcile_total",
+		"etcdisc_probe_scheduler_queue_depth",
+		"etcdisc_probe_worker_pool_active",
+		"etcdisc_probe_scheduler_scheduled_total",
 	} {
 		require.True(t, strings.Contains(body, name), name)
 	}

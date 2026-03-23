@@ -46,46 +46,100 @@ func TestCoordinatorRegistersMembersAndElectsSingleLeader(t *testing.T) {
 	require.Equal(t, leader1.NodeID, leader2.NodeID)
 }
 
-func TestCoordinatorFailoverAfterLeaderStops(t *testing.T) {
+func TestCoordinatorAutomaticallyReelectsAfterLeaderLeaseRevoked(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+
+	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup1() }()
+	coord2, cleanup2 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-2", HTTPAddr: "127.0.0.1:28080", GRPCAddr: "127.0.0.1:29090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup2() }()
+
+	require.Eventually(t, func() bool { return coord1.IsLeader() != coord2.IsLeader() }, 10*time.Second, 100*time.Millisecond)
+	leader1, ok := coord1.CurrentLeader()
+	require.True(t, ok)
+	if coord1.IsLeader() {
+		coord1.mu.RLock()
+		leaseID := coord1.leaderLeaseID
+		coord1.mu.RUnlock()
+		require.NotZero(t, leaseID)
+		require.NoError(t, coord1.store.RevokeLease(context.Background(), leaseID))
+	} else {
+		coord2.mu.RLock()
+		leaseID := coord2.leaderLeaseID
+		coord2.mu.RUnlock()
+		require.NotZero(t, leaseID)
+		require.NoError(t, coord2.store.RevokeLease(context.Background(), leaseID))
+	}
+
+	require.Eventually(t, func() bool {
+		leaderA, okA := coord1.CurrentLeader()
+		leaderB, okB := coord2.CurrentLeader()
+		if !okA || !okB {
+			return false
+		}
+		return leaderA.NodeID == leaderB.NodeID && leaderA.Epoch != leader1.Epoch && (coord1.IsLeader() || coord2.IsLeader())
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func TestCoordinatorRemovesExpiredMemberLease(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+
+	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup1() }()
+	coord2, cleanup2 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-2", HTTPAddr: "127.0.0.1:28080", GRPCAddr: "127.0.0.1:29090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup2() }()
+
+	require.Eventually(t, func() bool { return len(coord1.Members()) == 2 && len(coord2.Members()) == 2 }, 10*time.Second, 100*time.Millisecond)
+	coord2.mu.RLock()
+	memberLeaseID := coord2.memberLeaseID
+	coord2.mu.RUnlock()
+	require.NotZero(t, memberLeaseID)
+	require.NoError(t, coord2.store.RevokeLease(context.Background(), memberLeaseID))
+	require.Eventually(t, func() bool {
+		return len(coord1.Members()) == 1 || len(coord2.Members()) == 1
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func TestCoordinatorLeaderFailoverSupportsAssignmentRebuild(t *testing.T) {
 	endpoint, stopEtcd := startEmbeddedEtcd(t)
 	defer stopEtcd()
 	client := mustEtcdClient(t, endpoint)
 	defer client.Close()
 
 	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
-	coord2, cleanup2 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-2", HTTPAddr: "127.0.0.1:28080", GRPCAddr: "127.0.0.1:29090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
 	defer func() { _ = cleanup1() }()
+	coord2, cleanup2 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-2", HTTPAddr: "127.0.0.1:28080", GRPCAddr: "127.0.0.1:29090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
 	defer func() { _ = cleanup2() }()
+	require.Eventually(t, func() bool { return coord1.IsLeader() != coord2.IsLeader() }, 10*time.Second, 100*time.Millisecond)
 
-	require.Eventually(t, func() bool {
-		return coord1.IsLeader() != coord2.IsLeader()
-	}, 10*time.Second, 100*time.Millisecond)
-
-	var follower *Coordinator
-	var leaderCleanup func() error
+	var survivor *Coordinator
+	var oldLeaderCleanup func() error
 	if coord1.IsLeader() {
-		follower = coord2
-		leaderCleanup = cleanup1
+		survivor = coord2
+		oldLeaderCleanup = cleanup1
 	} else {
-		follower = coord1
-		leaderCleanup = cleanup2
+		survivor = coord1
+		oldLeaderCleanup = cleanup2
 	}
-
-	require.NoError(t, leaderCleanup())
+	require.NoError(t, oldLeaderCleanup())
 	_, err := client.Delete(context.Background(), keyspace.AssignmentLeaderKey())
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		if follower.IsLeader() {
+		if survivor.IsLeader() {
 			return true
 		}
-		acquired, acquireErr := follower.tryAcquireLeadership(context.Background())
+		acquired, acquireErr := survivor.tryAcquireLeadership(context.Background())
 		require.NoError(t, acquireErr)
-		return acquired || follower.IsLeader()
+		return acquired || survivor.IsLeader()
 	}, 10*time.Second, 100*time.Millisecond)
 
-	leaderRecord, ok := follower.CurrentLeader()
-	require.True(t, ok)
-	require.Equal(t, follower.config.NodeID, leaderRecord.NodeID)
+	require.NoError(t, survivor.RecordServiceSeed(context.Background(), "prod", "after-failover-api", 1))
+	require.Eventually(t, func() bool {
+		owner, ok := mustReadOwner(t, client, "prod", "after-failover-api")
+		return ok && owner.OwnerNodeID == survivor.config.NodeID
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func TestCoordinatorAssignsInitialOwnerToFirstIngressNode(t *testing.T) {
@@ -103,7 +157,7 @@ func TestCoordinatorAssignsInitialOwnerToFirstIngressNode(t *testing.T) {
 		return coord1.IsLeader() != coord2.IsLeader()
 	}, 10*time.Second, 100*time.Millisecond)
 
-	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api"))
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api", 1))
 	require.Eventually(t, func() bool {
 		owner, ok := mustReadOwner(t, client, "prod", "payment-api")
 		return ok && owner.OwnerNodeID == "node-2" && owner.Epoch == 1
@@ -124,8 +178,8 @@ func TestCoordinatorReassignsOnlyAffectedServiceOnMemberLeave(t *testing.T) {
 		return coord1.IsLeader() != coord2.IsLeader()
 	}, 10*time.Second, 100*time.Millisecond)
 
-	require.NoError(t, coord1.RecordServiceSeed(context.Background(), "prod", "order-api"))
-	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api"))
+	require.NoError(t, coord1.RecordServiceSeed(context.Background(), "prod", "order-api", 1))
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api", 2))
 	require.Eventually(t, func() bool {
 		orderOwner, okOrder := mustReadOwner(t, client, "prod", "order-api")
 		paymentOwner, okPayment := mustReadOwner(t, client, "prod", "payment-api")
@@ -149,7 +203,7 @@ func TestCoordinatorDoesNotRebalanceAllServicesOnMemberJoin(t *testing.T) {
 	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
 	defer func() { _ = cleanup1() }()
 	require.Eventually(t, func() bool { return coord1.IsLeader() }, 10*time.Second, 100*time.Millisecond)
-	require.NoError(t, coord1.RecordServiceSeed(context.Background(), "prod", "payment-api"))
+	require.NoError(t, coord1.RecordServiceSeed(context.Background(), "prod", "payment-api", 1))
 	require.Eventually(t, func() bool {
 		owner, ok := mustReadOwner(t, client, "prod", "payment-api")
 		return ok && owner.OwnerNodeID == "node-1" && owner.Epoch == 1
@@ -178,7 +232,7 @@ func TestCoordinatorActivatesOwnedServicesFromOwnerWatch(t *testing.T) {
 		return coord1.IsLeader() != coord2.IsLeader()
 	}, 10*time.Second, 100*time.Millisecond)
 
-	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api"))
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api", 1))
 	require.Eventually(t, func() bool {
 		owned := coord2.OwnedServices()
 		return len(owned) == 1 && owned[0].Namespace == "prod" && owned[0].Service == "payment-api" && owned[0].OwnerEpoch == 1
@@ -188,6 +242,31 @@ func TestCoordinatorActivatesOwnedServicesFromOwnerWatch(t *testing.T) {
 	require.Eventually(t, func() bool {
 		owned := coord1.OwnedServices()
 		return len(owned) == 1 && owned[0].Namespace == "prod" && owned[0].Service == "payment-api" && owned[0].OwnerEpoch > 1
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func TestCoordinatorRestoresOwnedServicesAfterOwnerWatchResetReload(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+
+	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup1() }()
+	require.Eventually(t, func() bool { return coord1.IsLeader() }, 10*time.Second, 100*time.Millisecond)
+	require.NoError(t, coord1.RecordServiceSeed(context.Background(), "prod", "watch-reset-api", 1))
+	require.Eventually(t, func() bool {
+		owned := coord1.OwnedServices()
+		return len(owned) == 1 && owned[0].Service == "watch-reset-api"
+	}, 10*time.Second, 100*time.Millisecond)
+
+	coord1.mu.Lock()
+	coord1.serviceOwners = map[string]model.ServiceOwner{}
+	coord1.ownedServices = map[string]OwnedService{}
+	coord1.mu.Unlock()
+	require.NoError(t, coord1.reloadServiceOwners(context.Background()))
+	coord1.syncOwnedServices(context.Background())
+	require.Eventually(t, func() bool {
+		owned := coord1.OwnedServices()
+		return len(owned) == 1 && owned[0].Service == "watch-reset-api"
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
@@ -210,6 +289,32 @@ func TestCoordinatorReconcileRemovesExpiredEmptyOwner(t *testing.T) {
 	owner, ok := mustReadOwner(t, client, "prod", "stale")
 	require.False(t, ok)
 	require.Equal(t, model.ServiceOwner{}, owner)
+}
+
+func TestCoordinatorPrefersLowerFirstRevisionForSeed(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+	client := mustEtcdClient(t, endpoint)
+	defer client.Close()
+
+	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup1() }()
+	coord2, cleanup2 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-2", HTTPAddr: "127.0.0.1:28080", GRPCAddr: "127.0.0.1:29090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup2() }()
+	require.Eventually(t, func() bool { return coord1.IsLeader() != coord2.IsLeader() }, 10*time.Second, 100*time.Millisecond)
+
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "billing-api", 20))
+	require.NoError(t, coord1.RecordServiceSeed(context.Background(), "prod", "billing-api", 10))
+	require.Eventually(t, func() bool {
+		seedRecord, err := client.Get(context.Background(), keyspace.ServiceSeedKey("prod", "billing-api"))
+		require.NoError(t, err)
+		if len(seedRecord.Kvs) == 0 {
+			return false
+		}
+		var seed model.ServiceSeed
+		require.NoError(t, json.Unmarshal(seedRecord.Kvs[0].Value, &seed))
+		return seed.IngressNodeID == "node-1" && seed.FirstRevision == 10
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func mustCoordinator(t *testing.T, endpoint string, cfg Config) (*Coordinator, func() error) {

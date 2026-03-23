@@ -31,7 +31,7 @@ type Service struct {
 
 // ServiceIngressRecorder captures the first ingress node for service ownership assignment.
 type ServiceIngressRecorder interface {
-	RecordServiceSeed(ctx context.Context, namespaceName, serviceName string) error
+	RecordServiceSeed(ctx context.Context, namespaceName, serviceName string, firstRevision int64) error
 }
 
 // RegisterInput captures provider registration inputs.
@@ -144,7 +144,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (model.Inst
 	if instance.HealthCheckMode == model.HealthCheckHeartbeat {
 		ttl := input.LeaseTTLSeconds
 		if ttl <= 0 {
-			ttl = 15
+			ttl = 60
 		}
 		leaseID, err := s.store.GrantLease(ctx, ttl)
 		if err != nil {
@@ -163,7 +163,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (model.Inst
 	}
 	instance.Revision = revision
 	if s.ingress != nil {
-		if err := s.ingress.RecordServiceSeed(ctx, instance.Namespace, instance.Service); err != nil {
+		if err := s.ingress.RecordServiceSeed(ctx, instance.Namespace, instance.Service, instance.Revision); err != nil {
 			return model.Instance{}, err
 		}
 	}

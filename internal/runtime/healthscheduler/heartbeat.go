@@ -107,6 +107,17 @@ type OwnedServicesProvider interface {
 	OwnedServices() []cluster.OwnedService
 }
 
+// OwnedEntries returns the current heartbeat entries tracked by the supervisor.
+func (s *HeartbeatSupervisor) OwnedEntries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]string, 0, len(s.entries))
+	for key := range s.entries {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // NewHeartbeatSupervisor creates a heartbeat timeout supervisor.
 func NewHeartbeatSupervisor(store port.Store, registry *registrysvc.Service, coordinator OwnedServicesProvider, clk clock.Clock, logger *slog.Logger) *HeartbeatSupervisor {
 	if clk == nil {
@@ -128,9 +139,10 @@ func (s *HeartbeatSupervisor) Start() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.started = true
 	heap.Init(&s.tasks)
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.syncLoop()
 	go s.runLoop()
+	go s.reconcileLoop()
 }
 
 // Close stops background loops.
@@ -185,6 +197,22 @@ func (s *HeartbeatSupervisor) runLoop() {
 			}
 		}
 		s.handleTask(s.ctx, task)
+	}
+}
+
+func (s *HeartbeatSupervisor) reconcileLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			runtimeReconcileTotal.Inc()
+			s.logger.Info("heartbeat reconciliation started")
+			s.syncOwnedServices(s.ctx)
+		}
 	}
 }
 
@@ -281,7 +309,15 @@ func (s *HeartbeatSupervisor) handleTask(ctx context.Context, task *heartbeatTas
 	}
 	instance, deleted, err := s.registry.ApplyHeartbeatTimeout(ctx, registrysvc.HeartbeatTimeoutInput{Namespace: task.Namespace, Service: task.Service, InstanceID: task.InstanceID, ExpectedRevision: task.Revision, ExpectedOwnerEpoch: task.OwnerEpoch})
 	if err != nil {
-		if apperrors.IsCode(err, apperrors.CodeConflict) || apperrors.IsCode(err, apperrors.CodeNotFound) {
+		if apperrors.IsCode(err, apperrors.CodeConflict) {
+			if apperrors.MessageOf(err) == "service owner epoch changed" {
+				runtimeOwnerEpochRejects.Inc()
+			} else {
+				runtimeRevisionConflicts.Inc()
+			}
+			return
+		}
+		if apperrors.IsCode(err, apperrors.CodeNotFound) {
 			return
 		}
 		s.logger.Warn("heartbeat timeout apply failed", "namespace", task.Namespace, "service", task.Service, "instanceId", task.InstanceID, "err", err)
@@ -289,6 +325,7 @@ func (s *HeartbeatSupervisor) handleTask(ctx context.Context, task *heartbeatTas
 	}
 	if deleted {
 		heartbeatStateTransitions.WithLabelValues("delete").Inc()
+		runtimeDeleteTotal.Inc()
 		s.logger.Info("heartbeat timeout deleted instance", "namespace", task.Namespace, "service", task.Service, "instanceId", task.InstanceID)
 		s.mu.Lock()
 		delete(s.entries, entryKey)

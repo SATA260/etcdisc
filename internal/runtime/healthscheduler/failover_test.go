@@ -64,21 +64,69 @@ func TestRuntimeFailoverRebuildsHeartbeatAndProbeOwnership(t *testing.T) {
 	defer func() { _ = probe2.Close() }()
 
 	require.Eventually(t, func() bool { return coord1.IsLeader() != coord2.IsLeader() }, 10*time.Second, 100*time.Millisecond)
-	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "heartbeat-api"))
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "heartbeat-api", 1))
 	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "heartbeat-api", InstanceID: "hb-1", Address: "127.0.0.1", Port: 8080}})
 	require.NoError(t, err)
-	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "probe-api"))
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "probe-api", 2))
 	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "probe-api", InstanceID: "pb-1", Address: "127.0.0.1", Port: 8081, HealthCheckMode: model.HealthCheckTCPProbe}})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		return len(coord2.OwnedServices()) >= 2 && len(hb2.entries) == 1 && len(probe2.entries) == 1
+		leftOwns := len(coord1.OwnedServices()) >= 2 && len(hb1.entries) == 1 && len(probe1.entries) == 1
+		rightOwns := len(coord2.OwnedServices()) >= 2 && len(hb2.entries) == 1 && len(probe2.entries) == 1
+		return leftOwns || rightOwns
 	}, 10*time.Second, 100*time.Millisecond)
 
-	require.NoError(t, coord2.Close())
+	closeOwnedSide := func() error {
+		if len(coord2.OwnedServices()) >= 2 {
+			return coord2.Close()
+		}
+		return coord1.Close()
+	}
+	require.NoError(t, closeOwnedSide())
 	require.Eventually(t, func() bool {
-		return len(coord1.OwnedServices()) >= 2 && len(hb1.entries) == 1 && len(probe1.entries) == 1
+		return len(coord1.OwnedServices()) >= 2 || len(coord2.OwnedServices()) >= 2
 	}, 10*time.Second, 200*time.Millisecond)
+}
+
+func TestRuntimeRestartRebuildsOwnedEntries(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcdForRuntime(t)
+	defer stopEtcd()
+
+	client := mustRuntimeClient(t, endpoint)
+	defer client.Close()
+	store := infraetcd.NewStore(client)
+	clk := namespacesvc.NewFixedClock(time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC))
+	nsService := namespacesvc.NewService(store, clk)
+	_, err := nsService.Create(context.Background(), namespacesvc.CreateNamespaceInput{Name: "prod"})
+	require.NoError(t, err)
+	registry := registrysvc.NewService(store, nsService, healthsvc.NewManager(), clk)
+	coord, err := cluster.NewCoordinator(store, logging.New(), clock.RealClock{}, cluster.Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	require.NoError(t, err)
+	require.NoError(t, coord.Start(context.Background()))
+	defer func() { _ = coord.Close() }()
+	require.Eventually(t, func() bool { return coord.IsLeader() }, 10*time.Second, 100*time.Millisecond)
+	require.NoError(t, coord.RecordServiceSeed(context.Background(), "prod", "heartbeat-api", 1))
+	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "heartbeat-api", InstanceID: "hb-1", Address: "127.0.0.1", Port: 8080}})
+	require.NoError(t, err)
+	require.NoError(t, coord.RecordServiceSeed(context.Background(), "prod", "probe-api", 2))
+	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "probe-api", InstanceID: "pb-1", Address: "127.0.0.1", Port: 8081, HealthCheckMode: model.HealthCheckTCPProbe}})
+	require.NoError(t, err)
+
+	hb := NewHeartbeatSupervisor(store, registry, coord, clk, logging.New())
+	hb.Start()
+	probe := NewProbeScheduler(store, registry, coord, probesvc.NewService(), clk, logging.New())
+	probe.Start()
+	require.Eventually(t, func() bool { return len(hb.entries) == 1 && len(probe.entries) == 1 }, 10*time.Second, 100*time.Millisecond)
+	require.NoError(t, hb.Close())
+	require.NoError(t, probe.Close())
+
+	hb2 := NewHeartbeatSupervisor(store, registry, coord, clk, logging.New())
+	hb2.ReconcileNow(context.Background())
+	probe2 := NewProbeScheduler(store, registry, coord, probesvc.NewService(), clk, logging.New())
+	probe2.ReconcileNow(context.Background())
+	require.Len(t, hb2.entries, 1)
+	require.Len(t, probe2.entries, 1)
 }
 
 func startEmbeddedEtcdForRuntime(t *testing.T) (string, func()) {

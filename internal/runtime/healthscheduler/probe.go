@@ -44,6 +44,18 @@ var (
 		Name: "etcdisc_runtime_reconcile_total",
 		Help: "Count of runtime reconciliation loops executed by workers.",
 	})
+	probeSchedulerQueueDepth = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "etcdisc_probe_scheduler_queue_depth",
+		Help: "Current number of queued probe tasks in the local scheduler heap.",
+	})
+	probeWorkerPoolActive = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "etcdisc_probe_worker_pool_active",
+		Help: "Current number of active probe workers executing tasks.",
+	})
+	probeScheduledTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "etcdisc_probe_scheduler_scheduled_total",
+		Help: "Count of probe tasks scheduled for execution.",
+	})
 )
 
 type probeEntry struct {
@@ -130,6 +142,17 @@ type ProbeScheduler struct {
 	counter    atomic.Uint64
 }
 
+// OwnedEntries returns the current probe entries tracked by the scheduler.
+func (s *ProbeScheduler) OwnedEntries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]string, 0, len(s.entries))
+	for key := range s.entries {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // NewProbeScheduler creates a probe scheduler with the agreed defaults.
 func NewProbeScheduler(store port.Store, registry *registrysvc.Service, coordinator OwnedServicesProvider, probe ProbeRunner, clk clock.Clock, logger *slog.Logger) *ProbeScheduler {
 	if clk == nil {
@@ -154,6 +177,7 @@ func (s *ProbeScheduler) Start() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.started = true
 	heap.Init(&s.tasks)
+	probeSchedulerQueueDepth.Set(0)
 	s.wg.Add(3 + s.concurrency)
 	go s.syncLoop()
 	go s.scheduleLoop()
@@ -225,7 +249,9 @@ func (s *ProbeScheduler) workerLoop() {
 		case <-s.ctx.Done():
 			return
 		case job := <-s.jobs:
+			probeWorkerPoolActive.Inc()
 			s.runProbeJob(job)
+			probeWorkerPoolActive.Dec()
 		}
 	}
 }
@@ -249,14 +275,17 @@ func (s *ProbeScheduler) nextTask() (*probeTask, time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.tasks) == 0 {
+		probeSchedulerQueueDepth.Set(0)
 		return nil, 0
 	}
 	task := s.tasks[0]
+	probeSchedulerQueueDepth.Set(float64(len(s.tasks)))
 	now := s.clock.Now()
 	if task.DueAt.After(now) {
 		return task, task.DueAt.Sub(now)
 	}
 	heap.Pop(&s.tasks)
+	probeSchedulerQueueDepth.Set(float64(len(s.tasks)))
 	return task, 0
 }
 
@@ -268,6 +297,7 @@ func (s *ProbeScheduler) dispatchTask(task *probeTask) {
 	if !ok || entry.Token != task.Token || entry.OwnerEpoch != task.OwnerEpoch {
 		return
 	}
+	probeScheduledTotal.Inc()
 	select {
 	case s.jobs <- probeJob{Entry: entry}:
 	case <-s.ctx.Done():
@@ -284,15 +314,15 @@ func (s *ProbeScheduler) runProbeJob(job probeJob) {
 	result := s.probe.Probe(ctx, model.Instance{Namespace: job.Entry.Namespace, Service: job.Entry.Service, InstanceID: job.Entry.InstanceID, HealthCheckMode: job.Entry.ProbeMode, ProbeConfig: job.Entry.ProbeConfig})
 	instance, deleted, err := s.registry.ApplyProbeResult(baseCtx, registrysvc.ProbeResultInput{Namespace: job.Entry.Namespace, Service: job.Entry.Service, InstanceID: job.Entry.InstanceID, Success: result.Success, PolicyOverride: &healthsvc.Policy{FailureThreshold: 3, SuccessThreshold: 2, DeleteThreshold: 5}, ExpectedRevision: job.Entry.Revision, ExpectedOwnerEpoch: job.Entry.OwnerEpoch})
 	if err != nil {
+		if apperrors.MessageOf(err) == "service owner epoch changed" {
+			runtimeOwnerEpochRejects.Inc()
+			return
+		}
 		if apperrors.IsCode(err, apperrors.CodeConflict) {
 			runtimeRevisionConflicts.Inc()
 			return
 		}
 		if apperrors.IsCode(err, apperrors.CodeNotFound) {
-			return
-		}
-		if apperrors.MessageOf(err) == "service owner epoch changed" {
-			runtimeOwnerEpochRejects.Inc()
 			return
 		}
 		s.logger.Warn("probe apply failed", "namespace", job.Entry.Namespace, "service", job.Entry.Service, "instanceId", job.Entry.InstanceID, "err", err)
@@ -315,6 +345,7 @@ func (s *ProbeScheduler) runProbeJob(job probeJob) {
 	entry.Token++
 	s.entries[entryKey] = entry
 	heap.Push(&s.tasks, &probeTask{ServiceKey: entry.ServiceKey, Namespace: entry.Namespace, Service: entry.Service, InstanceID: entry.InstanceID, DueAt: s.clock.Now().Add(s.interval), Token: entry.Token, Revision: entry.Revision, OwnerEpoch: entry.OwnerEpoch})
+	probeSchedulerQueueDepth.Set(float64(len(s.tasks)))
 	s.mu.Unlock()
 	s.logger.Info("probe applied", "namespace", job.Entry.Namespace, "service", job.Entry.Service, "instanceId", job.Entry.InstanceID, "success", result.Success)
 }
@@ -369,6 +400,7 @@ func (s *ProbeScheduler) upsertEntry(entry probeEntry) {
 	entry.Token = current.Token + 1
 	s.entries[entryKey] = entry
 	heap.Push(&s.tasks, &probeTask{ServiceKey: entry.ServiceKey, Namespace: entry.Namespace, Service: entry.Service, InstanceID: entry.InstanceID, DueAt: s.clock.Now().Add(s.interval), Token: entry.Token, Revision: entry.Revision, OwnerEpoch: entry.OwnerEpoch})
+	probeSchedulerQueueDepth.Set(float64(len(s.tasks)))
 	s.mu.Unlock()
 	if !exists {
 		runtimeRebuildTotal.Inc()

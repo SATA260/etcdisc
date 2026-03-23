@@ -211,31 +211,69 @@ func (c *Coordinator) CurrentLeader() (model.AssignmentLeader, bool) {
 	return c.currentLeader, c.hasLeader
 }
 
-// RecordServiceSeed records the first ingress node for a service when the local node accepts its initial traffic.
-func (c *Coordinator) RecordServiceSeed(ctx context.Context, namespaceName, serviceName string) error {
+// RecordServiceSeed records the earliest known ingress node and revision for a service.
+func (c *Coordinator) RecordServiceSeed(ctx context.Context, namespaceName, serviceName string, firstRevision int64) error {
 	if !c.config.Enabled {
 		return nil
 	}
-	seed := model.ServiceSeed{Namespace: namespaceName, Service: serviceName, IngressNodeID: c.config.NodeID, CreatedAt: c.clock.Now()}
-	payload, err := json.Marshal(seed)
-	if err != nil {
-		return err
-	}
-	revision, err := c.store.Create(ctx, keyspace.ServiceSeedKey(namespaceName, serviceName), payload, 0)
-	if err != nil {
-		if apperrors.IsCode(err, apperrors.CodeAlreadyExists) {
+	seedKey := keyspace.ServiceSeedKey(namespaceName, serviceName)
+	for {
+		record, err := c.store.Get(ctx, seedKey)
+		if err != nil {
+			if !apperrors.IsCode(err, apperrors.CodeNotFound) {
+				return err
+			}
+			seed := model.ServiceSeed{Namespace: namespaceName, Service: serviceName, IngressNodeID: c.config.NodeID, CreatedAt: c.clock.Now(), FirstRevision: firstRevision}
+			payload, marshalErr := json.Marshal(seed)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			revision, createErr := c.store.Create(ctx, seedKey, payload, 0)
+			if createErr != nil {
+				if apperrors.IsCode(createErr, apperrors.CodeAlreadyExists) {
+					continue
+				}
+				return createErr
+			}
+			seed.Revision = revision
+			c.mu.Lock()
+			c.serviceSeeds[serviceKey(namespaceName, serviceName)] = seed
+			c.mu.Unlock()
+			if c.IsLeader() {
+				c.signalMemberChange("")
+			}
 			return nil
 		}
-		return err
+		current, err := decodeServiceSeed(record)
+		if err != nil {
+			return err
+		}
+		if current.FirstRevision != 0 && current.FirstRevision <= firstRevision {
+			return nil
+		}
+		current.IngressNodeID = c.config.NodeID
+		current.CreatedAt = c.clock.Now()
+		current.FirstRevision = firstRevision
+		payload, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		revision, err := c.store.CAS(ctx, seedKey, current.Revision, payload, 0)
+		if err != nil {
+			if apperrors.IsCode(err, apperrors.CodeConflict) {
+				continue
+			}
+			return err
+		}
+		current.Revision = revision
+		c.mu.Lock()
+		c.serviceSeeds[serviceKey(namespaceName, serviceName)] = current
+		c.mu.Unlock()
+		if c.IsLeader() {
+			c.signalMemberChange("")
+		}
+		return nil
 	}
-	seed.Revision = revision
-	c.mu.Lock()
-	c.serviceSeeds[serviceKey(namespaceName, serviceName)] = seed
-	c.mu.Unlock()
-	if c.IsLeader() {
-		c.signalMemberChange("")
-	}
-	return nil
 }
 
 // Members returns the current member view observed by the local node.
@@ -555,11 +593,14 @@ func (c *Coordinator) leaderWatchLoop() {
 
 func (c *Coordinator) electionLoop() {
 	defer c.wg.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.runCtx.Done():
 			return
 		case <-c.electionSignal:
+		case <-ticker.C:
 		}
 		for {
 			if c.runCtx.Err() != nil {
@@ -955,6 +996,7 @@ func (c *Coordinator) reconcileOwners(ctx context.Context) error {
 					return err
 				}
 				reconciliationRepairs.Inc()
+				c.logger.Info("reconciliation repaired owner ttl", "namespace", owner.Namespace, "service", owner.Service)
 			}
 			if !contains(alive, owner.OwnerNodeID) {
 				seed := c.snapshotSeeds()[serviceKey(owner.Namespace, owner.Service)]
@@ -962,6 +1004,7 @@ func (c *Coordinator) reconcileOwners(ctx context.Context) error {
 					return err
 				}
 				reconciliationRepairs.Inc()
+				c.logger.Info("reconciliation repaired stale owner member", "namespace", owner.Namespace, "service", owner.Service)
 			}
 			continue
 		}
@@ -973,6 +1016,7 @@ func (c *Coordinator) reconcileOwners(ctx context.Context) error {
 				return err
 			}
 			reconciliationRepairs.Inc()
+			c.logger.Info("reconciliation marked empty service owner ttl", "namespace", owner.Namespace, "service", owner.Service)
 			continue
 		}
 		if c.clock.Now().After(owner.ExpiresAt) {
@@ -980,6 +1024,7 @@ func (c *Coordinator) reconcileOwners(ctx context.Context) error {
 				return err
 			}
 			reconciliationRepairs.Inc()
+			c.logger.Info("reconciliation deleted expired service owner", "namespace", owner.Namespace, "service", owner.Service)
 		}
 	}
 	return nil

@@ -39,5 +39,6 @@ type ServiceSeed struct {
 	Service       string    `json:"service"`
 	IngressNodeID string    `json:"ingressNodeId"`
 	CreatedAt     time.Time `json:"createdAt"`
+	FirstRevision int64     `json:"firstRevision"`
 	Revision      int64     `json:"revision"`
 }
