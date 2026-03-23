@@ -1,8 +1,8 @@
 # etcdisc
 
-`etcdisc` 是一个基于 `etcd` 构建的第一阶段控制面注册中心（Control Plane Registry）。
+`etcdisc` 是一个基于 `etcd` 构建的控制面注册中心（Control Plane Registry）。
 
-当前版本聚焦在“可用的第一版主链路”，提供以下能力：
+当前版本已经覆盖 phase-1 控制面主链路，并补齐了 phase-2 的第一版集群运行时能力，提供以下能力：
 
 - 服务注册与发现
 - 心跳保活与服务端主动探活
@@ -12,20 +12,26 @@
 - HTTP 与 gRPC 双接入层
 - Provider / Consumer / Config 三套 SDK
 - 管理 API 与简单控制台
+- 集群成员管理、assignment leader、service owner、heartbeat/probe runtime failover
 
-项目实现严格参考 `tmp/docs/` 下的 phase-1 需求、架构和 TDD 文档。
+项目实现严格参考 `tmp/docs/` 下的需求、架构、SDD 和 TDD 文档。
 
 ## 项目定位
 
-第一阶段的 `etcdisc` 只解决最核心的控制面问题：
+当前 `etcdisc` 分两层演进：
+
+- phase-1：控制面注册、发现、配置、A2A、管理面
+- phase-2：集群运行时 ownership、heartbeat 超时推进、主动探活调度、故障接管
+
+当前重点仍然是 **CP-only**，优先保证状态机、一致性、watch 和 failover 行为正确。
+
+`etcdisc` 解决的核心问题包括：
 
 - Provider 把实例注册到服务端
 - Consumer 通过快照和 watch 获取服务列表
 - Config SDK 获取有效配置并持续订阅变更
 - Agent 通过 `AgentCard` 和 capability 被发现
 - 管理员通过 Admin API 和控制台完成基本运维操作
-
-这是一个 **CP-only** 的第一版实现，重点是把产品语义、状态机、watch 模型和 etcd 落库行为做稳定。
 
 ## 当前范围
 
@@ -35,6 +41,14 @@
 - 只做模式 A：客户端直连 registry server
 - 支持多 namespace
 - 支持 HTTP 和 gRPC
+- 支持第一版集群运行时：
+  - worker member lease
+  - assignment leader 选举
+  - `namespace + service` 粒度 service owner
+  - owner epoch fencing
+  - heartbeat timeout supervisor
+  - probe scheduler + worker pool
+  - reconciliation + rebuild
 - 支持 4 种健康模式：
   - `heartbeat`
   - `http_probe`
@@ -49,11 +63,13 @@
 ### 当前不在范围内
 
 - 本地 agent / sidecar 模式
-- registry server 集群化治理
 - 复杂协议协商
 - 工作流 / 编排能力
 - 完整平台化前端 UI
 - 业务侧统一鉴权
+- 动态负载感知调度
+- 每次节点新增都做全量 rebalance
+- 按实例粒度 ownership
 
 ## 核心能力
 
@@ -67,11 +83,23 @@
 
 ### 2. 健康管理
 
-- `heartbeat` 模式：实例 key 绑定 etcd lease
+- `heartbeat` 模式：实例 key 绑定 etcd lease，服务端维护 `health -> unhealth -> delete`
 - `probe` 模式：实例 key 不绑定 lease
 - 支持 HTTP / gRPC / TCP 主动探活
 - 状态机语义：`health -> unhealth -> delete`
 - `delete` 直接物理删除 etcd 中的实例 key
+
+### 2.1 集群运行时管理
+
+- worker 通过 member lease 加入集群
+- assignment leader 负责 service owner 分配与重分配
+- owner 粒度固定为 `namespace + service`
+- 任意节点都可接收 register / heartbeat / update
+- runtime health 状态推进只由当前 owner 执行
+- owner 驱动写入同时校验：
+  - `ownerEpoch`
+  - `instanceRevision`
+- worker failover 后可从 etcd 事实状态 rebuild runtime task
 
 ### 3. 服务发现
 
@@ -129,7 +157,8 @@
 1. `HTTP` / `gRPC` handler 负责请求解析与响应输出
 2. `service` 层负责业务规则、校验、状态机和查询语义
 3. `etcd adapter` 负责持久化、事务、lease 和 watch
-4. SDK 侧采用 `snapshot -> watch -> local cache` 模型
+4. `cluster runtime` 负责成员发现、ownership、heartbeat/probe 调度
+5. SDK 侧采用 `snapshot -> watch -> local cache` 模型
 
 设计原则：
 
@@ -137,6 +166,7 @@
 - 关键元数据采用 `CAS`
 - 高频运行时状态采用 `LWW`
 - discovery 流和 config 流独立建模
+- 本地调度队列只是执行缓存，etcd 中的事实状态才是权威来源
 
 ## 仓库结构
 
@@ -149,6 +179,7 @@ etcdisc/
   internal/app/                bootstrap 与依赖装配
   internal/core/               model、service、port、keyspace、errors
   internal/infra/              etcd、logging、metrics、clock
+  internal/runtime/            cluster ownership 与 runtime health scheduler
   pkg/                         对外 SDK 与公共 DTO
   test/e2e/                    HTTP / gRPC 端到端测试
   test/integration/            真实 etcd 集成测试
@@ -209,6 +240,15 @@ make test
 make integration
 ```
 
+集群运行时关键覆盖已经包含在 `go test ./...` 中，主要包括：
+
+- assignment leader / member lease
+- service owner assignment / epoch fencing
+- heartbeat timeout supervisor
+- probe scheduler / worker pool
+- reconciliation / rebuild
+- clustered runtime E2E
+
 ### 4. 统计覆盖率
 
 ```bash
@@ -216,11 +256,20 @@ go test -count=1 ./... -coverprofile=coverage.out
 go tool cover -func=coverage.out
 ```
 
+如果用于评估业务代码覆盖率，建议排除生成文件：
+
+- `api/proto/etcdisc/v1/etcdisc.pb.go`
+- `api/proto/etcdisc/v1/etcdisc_grpc.pb.go`
+- `api/proto/etcdisc/v1/convert.go`
+
+当前业务代码覆盖率已经达到 `80%+`。
+
 ## 配置说明
 
 默认配置文件：
 
 - `deployments/etcdisc.yaml`
+- `deployments/etcdisc-cluster.yaml`
 
 常用环境变量覆盖项：
 
@@ -233,6 +282,14 @@ go tool cover -func=coverage.out
 - `ETCDISC_GRPC_PORT`
 - `ETCDISC_ETCD_ENDPOINTS`
 - `ETCDISC_ETCD_DIAL_MS`
+- `ETCDISC_CLUSTER_ENABLED`
+- `ETCDISC_CLUSTER_NODE_ID`
+- `ETCDISC_CLUSTER_ADVERTISE_HTTP_ADDR`
+- `ETCDISC_CLUSTER_ADVERTISE_GRPC_ADDR`
+- `ETCDISC_CLUSTER_MEMBER_TTL_SECONDS`
+- `ETCDISC_CLUSTER_MEMBER_KEEPALIVE_SECONDS`
+- `ETCDISC_CLUSTER_LEADER_TTL_SECONDS`
+- `ETCDISC_CLUSTER_LEADER_KEEPALIVE_SECONDS`
 - `ETCDISC_ADMIN_TOKEN`
 
 本地默认管理员 Token：
@@ -445,6 +502,7 @@ curl "http://127.0.0.1:8080/v1/a2a/discovery?namespace=prod-core&capability=tool
 - SDK 单元测试
 - 真实 etcd 集成测试
 - HTTP / gRPC E2E 测试
+- cluster runtime failover 测试
 
 推荐测试顺序：
 
@@ -463,13 +521,3 @@ curl "http://127.0.0.1:8080/v1/a2a/discovery?namespace=prod-core&capability=tool
   `snapshot -> watch -> local cache`
 
 - namespace 是显式资源，不是字符串约定
-
-## 推荐阅读顺序
-
-如果你要继续扩展 phase-2 或后续版本，建议先读：
-
-- `tmp/docs/01-product-requirements.md`
-- `tmp/docs/04-backend-architecture.md`
-- `tmp/docs/05-implementation-plan.md`
-- `tmp/docs/06-tdd-strategy.md`
-- `tmp/docs/07-phase1-build-todo.md`
