@@ -57,8 +57,40 @@ func applyEnv(cfg *Config) error {
 	if err := applyInt(&cfg.Etcd.DialMS, envPrefix+"ETCD_DIAL_MS"); err != nil {
 		return err
 	}
+	if value, ok, err := parseBoolEnv(envPrefix + "CLUSTER_ENABLED"); err != nil {
+		return err
+	} else if ok {
+		cfg.Cluster.Enabled = value
+	}
+	applyString(&cfg.Cluster.NodeID, envPrefix+"CLUSTER_NODE_ID")
+	applyString(&cfg.Cluster.AdvertiseHTTPAddr, envPrefix+"CLUSTER_ADVERTISE_HTTP_ADDR")
+	applyString(&cfg.Cluster.AdvertiseGRPCAddr, envPrefix+"CLUSTER_ADVERTISE_GRPC_ADDR")
+	if err := applyInt(&cfg.Cluster.MemberTTLSeconds, envPrefix+"CLUSTER_MEMBER_TTL_SECONDS"); err != nil {
+		return err
+	}
+	if err := applyInt(&cfg.Cluster.MemberKeepAliveSeconds, envPrefix+"CLUSTER_MEMBER_KEEPALIVE_SECONDS"); err != nil {
+		return err
+	}
+	if err := applyInt(&cfg.Cluster.LeaderTTLSeconds, envPrefix+"CLUSTER_LEADER_TTL_SECONDS"); err != nil {
+		return err
+	}
+	if err := applyInt(&cfg.Cluster.LeaderKeepAliveSeconds, envPrefix+"CLUSTER_LEADER_KEEPALIVE_SECONDS"); err != nil {
+		return err
+	}
 	applyString(&cfg.Admin.Token, envPrefix+"ADMIN_TOKEN")
 	return nil
+}
+
+func parseBoolEnv(envKey string) (bool, bool, error) {
+	value := os.Getenv(envKey)
+	if value == "" {
+		return false, false, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, true, err
+	}
+	return parsed, true, nil
 }
 
 func applyString(target *string, envKey string) {

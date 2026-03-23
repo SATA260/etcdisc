@@ -12,7 +12,10 @@ etcd:
     - 127.0.0.1:2379
   dialMS: 3000
 cluster:
-  enabled: false
+  enabled: true
+  nodeId: etcdisc-node-1
+  advertiseHTTPAddr: 127.0.0.1:8080
+  advertiseGRPCAddr: 127.0.0.1:9090
   memberTTLSeconds: 30
   memberKeepAliveSeconds: 10
   leaderTTLSeconds: 30

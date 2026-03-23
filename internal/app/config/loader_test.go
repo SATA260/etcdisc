@@ -25,6 +25,15 @@ etcd:
   endpoints:
     - 127.0.0.1:22379
   dialMS: 5000
+cluster:
+  enabled: true
+  nodeId: node-yaml
+  advertiseHTTPAddr: 10.0.0.1:18080
+  advertiseGRPCAddr: 10.0.0.1:19090
+  memberTTLSeconds: 40
+  memberKeepAliveSeconds: 12
+  leaderTTLSeconds: 35
+  leaderKeepAliveSeconds: 11
 admin:
   token: from-yaml
 `), 0o600))
@@ -32,6 +41,8 @@ admin:
 	t.Setenv("ETCDISC_CONFIG_FILE", configPath)
 	t.Setenv("ETCDISC_HTTP_PORT", "28080")
 	t.Setenv("ETCDISC_ETCD_ENDPOINTS", "127.0.0.1:32379,127.0.0.1:42379")
+	t.Setenv("ETCDISC_CLUSTER_NODE_ID", "node-env")
+	t.Setenv("ETCDISC_CLUSTER_MEMBER_TTL_SECONDS", "50")
 	t.Setenv("ETCDISC_ADMIN_TOKEN", "from-env")
 
 	cfg, err := Load()
@@ -41,6 +52,9 @@ admin:
 	require.Equal(t, 28080, cfg.HTTP.Port)
 	require.Equal(t, 19090, cfg.GRPC.Port)
 	require.Equal(t, []string{"127.0.0.1:32379", "127.0.0.1:42379"}, cfg.Etcd.Endpoints)
+	require.True(t, cfg.Cluster.Enabled)
+	require.Equal(t, "node-env", cfg.Cluster.NodeID)
+	require.Equal(t, 50, cfg.Cluster.MemberTTLSeconds)
 	require.Equal(t, "from-env", cfg.Admin.Token)
 }
 
@@ -53,5 +67,7 @@ func TestLoadUsesDefaultsWithoutFile(t *testing.T) {
 	require.Equal(t, 8080, cfg.HTTP.Port)
 	require.Equal(t, 9090, cfg.GRPC.Port)
 	require.NotEmpty(t, cfg.Etcd.Endpoints)
+	require.False(t, cfg.Cluster.Enabled)
+	require.Equal(t, 30, cfg.Cluster.MemberTTLSeconds)
 	require.NotEmpty(t, cfg.Admin.Token)
 }

@@ -30,6 +30,10 @@ func TestKeyBuilders(t *testing.T) {
 	require.Equal(t, "/etcdisc/capabilities/prod/tool.search/agent-1", CapabilityKey("prod", "tool.search", "agent-1"))
 	require.Equal(t, "/etcdisc/capabilities/prod/tool.search/", CapabilityPrefix("prod", "tool.search"))
 	require.Equal(t, "/etcdisc/audit/", AuditPrefix())
+	require.Equal(t, "/etcdisc/runtime/", RuntimeRootPrefix())
+	require.Equal(t, "/etcdisc/runtime/assignment/leader", AssignmentLeaderKey())
+	require.Equal(t, "/etcdisc/runtime/members/node-1", WorkerMemberKey("node-1"))
+	require.Equal(t, "/etcdisc/runtime/members/", WorkerMemberPrefix())
 }
 
 func TestResourceFromKey(t *testing.T) {
@@ -41,5 +45,7 @@ func TestResourceFromKey(t *testing.T) {
 	require.Equal(t, "agentcard", ResourceFromKey(AgentCardKey("prod", "agent-1")))
 	require.Equal(t, "capability", ResourceFromKey(CapabilityKey("prod", "tool.search", "agent-1")))
 	require.Equal(t, "audit", ResourceFromKey(AuditKey("evt-1")))
+	require.Equal(t, "runtime", ResourceFromKey(AssignmentLeaderKey()))
+	require.Equal(t, "runtime", ResourceFromKey(WorkerMemberKey("node-1")))
 	require.Equal(t, "unknown", ResourceFromKey("/other/path"))
 }

@@ -3,10 +3,11 @@ package config
 
 // Config is the root application configuration.
 type Config struct {
-	App  AppConfig  `yaml:"app"`
-	HTTP HTTPConfig `yaml:"http"`
-	GRPC GRPCConfig `yaml:"grpc"`
-	Etcd EtcdConfig `yaml:"etcd"`
+	App     AppConfig     `yaml:"app"`
+	HTTP    HTTPConfig    `yaml:"http"`
+	GRPC    GRPCConfig    `yaml:"grpc"`
+	Etcd    EtcdConfig    `yaml:"etcd"`
+	Cluster ClusterConfig `yaml:"cluster"`
 
 	Admin AdminConfig `yaml:"admin"`
 }
@@ -40,6 +41,18 @@ type AdminConfig struct {
 	Token string `yaml:"token"`
 }
 
+// ClusterConfig stores runtime cluster membership and leader election settings.
+type ClusterConfig struct {
+	Enabled                bool   `yaml:"enabled"`
+	NodeID                 string `yaml:"nodeId"`
+	AdvertiseHTTPAddr      string `yaml:"advertiseHTTPAddr"`
+	AdvertiseGRPCAddr      string `yaml:"advertiseGRPCAddr"`
+	MemberTTLSeconds       int    `yaml:"memberTTLSeconds"`
+	MemberKeepAliveSeconds int    `yaml:"memberKeepAliveSeconds"`
+	LeaderTTLSeconds       int    `yaml:"leaderTTLSeconds"`
+	LeaderKeepAliveSeconds int    `yaml:"leaderKeepAliveSeconds"`
+}
+
 // Default returns the baseline configuration used when no file or env override is provided.
 func Default() Config {
 	return Config{
@@ -58,6 +71,13 @@ func Default() Config {
 		Etcd: EtcdConfig{
 			Endpoints: []string{"127.0.0.1:2379"},
 			DialMS:    3000,
+		},
+		Cluster: ClusterConfig{
+			Enabled:                false,
+			MemberTTLSeconds:       30,
+			MemberKeepAliveSeconds: 10,
+			LeaderTTLSeconds:       30,
+			LeaderKeepAliveSeconds: 10,
 		},
 		Admin: AdminConfig{
 			Token: "change-me-in-dev",

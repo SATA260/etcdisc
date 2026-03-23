@@ -3,9 +3,11 @@ package wiring
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	grpcserver "etcdisc/internal/api/grpcserver"
 	a2ahttp "etcdisc/internal/api/http/a2a"
@@ -27,6 +29,7 @@ import (
 	"etcdisc/internal/infra/etcd"
 	"etcdisc/internal/infra/logging"
 	"etcdisc/internal/infra/metrics"
+	"etcdisc/internal/runtime/cluster"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
@@ -39,10 +42,16 @@ type Dependencies struct {
 	GRPCServer *grpc.Server
 	ETCDClient *clientv3.Client
 	ReadyCheck adminhttp.ReadyCheck
+	Cluster    *cluster.Coordinator
 }
 
 // Close releases opened infrastructure clients.
 func (d Dependencies) Close() error {
+	if d.Cluster != nil {
+		if err := d.Cluster.Close(); err != nil {
+			return err
+		}
+	}
 	if d.ETCDClient != nil {
 		return d.ETCDClient.Close()
 	}
@@ -66,6 +75,25 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 	auditService := auditsvc.NewService(store, clk)
 	a2aService := a2asvc.NewService(store, namespaceService, registryService, clk)
 	readyCheck := func(ctx context.Context) error { return store.Status(ctx) }
+	var runtimeCluster *cluster.Coordinator
+	if cfg.Cluster.Enabled {
+		runtimeCluster, err = cluster.NewCoordinator(store, logger, clk, cluster.Config{
+			Enabled:                 cfg.Cluster.Enabled,
+			NodeID:                  cfg.Cluster.NodeID,
+			HTTPAddr:                firstNonEmpty(cfg.Cluster.AdvertiseHTTPAddr, normalizeAdvertiseAddr(cfg.HTTP.Host, cfg.HTTP.Port)),
+			GRPCAddr:                firstNonEmpty(cfg.Cluster.AdvertiseGRPCAddr, normalizeAdvertiseAddr(cfg.GRPC.Host, cfg.GRPC.Port)),
+			MemberTTL:               time.Duration(cfg.Cluster.MemberTTLSeconds) * time.Second,
+			MemberKeepAliveInterval: time.Duration(cfg.Cluster.MemberKeepAliveSeconds) * time.Second,
+			LeaderTTL:               time.Duration(cfg.Cluster.LeaderTTLSeconds) * time.Second,
+			LeaderKeepAliveInterval: time.Duration(cfg.Cluster.LeaderKeepAliveSeconds) * time.Second,
+		})
+		if err != nil {
+			return Dependencies{}, err
+		}
+		if err := runtimeCluster.Start(context.Background()); err != nil {
+			return Dependencies{}, err
+		}
+	}
 
 	registryAPI := registryhttp.API{Service: registryService}
 	discoveryAPI := discoveryhttp.API{Service: discoveryService}
@@ -118,7 +146,24 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 		GRPCServer: grpcserver.New(grpcserver.Services{Registry: registryService, Discovery: discoveryService, Config: configService, A2A: a2aService}),
 		ETCDClient: etcdClient,
 		ReadyCheck: readyCheck,
+		Cluster:    runtimeCluster,
 	}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeAdvertiseAddr(host string, port int) string {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s:%d", host, port)
 }
 
 func init() {

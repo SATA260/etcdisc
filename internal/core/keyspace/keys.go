@@ -10,6 +10,26 @@ import (
 
 const root = "/etcdisc"
 
+// RuntimeRootPrefix returns the runtime control root prefix.
+func RuntimeRootPrefix() string {
+	return root + "/runtime/"
+}
+
+// AssignmentLeaderKey returns the cluster assignment leader key.
+func AssignmentLeaderKey() string {
+	return root + "/runtime/assignment/leader"
+}
+
+// WorkerMemberKey returns the worker member key for one node.
+func WorkerMemberKey(nodeID string) string {
+	return fmt.Sprintf("%s/runtime/members/%s", root, nodeID)
+}
+
+// WorkerMemberPrefix returns the worker member prefix.
+func WorkerMemberPrefix() string {
+	return root + "/runtime/members/"
+}
+
 // NamespaceKey returns the key for namespace metadata.
 func NamespaceKey(name string) string {
 	return fmt.Sprintf("%s/namespaces/%s", root, name)
@@ -114,6 +134,8 @@ func ResourceFromKey(key string) string {
 		return "capability"
 	case strings.HasPrefix(key, AuditPrefix()):
 		return "audit"
+	case key == AssignmentLeaderKey() || strings.HasPrefix(key, WorkerMemberPrefix()):
+		return "runtime"
 	default:
 		return "unknown"
 	}
