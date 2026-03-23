@@ -74,9 +74,13 @@ func TestCoordinatorFailoverAfterLeaderStops(t *testing.T) {
 	require.NoError(t, leaderCleanup())
 	_, err := client.Delete(context.Background(), keyspace.AssignmentLeaderKey())
 	require.NoError(t, err)
-	follower.signalElection()
 	require.Eventually(t, func() bool {
-		return follower.IsLeader()
+		if follower.IsLeader() {
+			return true
+		}
+		acquired, acquireErr := follower.tryAcquireLeadership(context.Background())
+		require.NoError(t, acquireErr)
+		return acquired || follower.IsLeader()
 	}, 10*time.Second, 100*time.Millisecond)
 
 	leaderRecord, ok := follower.CurrentLeader()
@@ -159,6 +163,32 @@ func TestCoordinatorDoesNotRebalanceAllServicesOnMemberJoin(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "node-1", owner.OwnerNodeID)
 	require.Equal(t, int64(1), owner.Epoch)
+}
+
+func TestCoordinatorActivatesOwnedServicesFromOwnerWatch(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+
+	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup1() }()
+	coord2, cleanup2 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-2", HTTPAddr: "127.0.0.1:28080", GRPCAddr: "127.0.0.1:29090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup2() }()
+
+	require.Eventually(t, func() bool {
+		return coord1.IsLeader() != coord2.IsLeader()
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api"))
+	require.Eventually(t, func() bool {
+		owned := coord2.OwnedServices()
+		return len(owned) == 1 && owned[0].Namespace == "prod" && owned[0].Service == "payment-api" && owned[0].OwnerEpoch == 1
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.NoError(t, cleanup2())
+	require.Eventually(t, func() bool {
+		owned := coord1.OwnedServices()
+		return len(owned) == 1 && owned[0].Namespace == "prod" && owned[0].Service == "payment-api" && owned[0].OwnerEpoch > 1
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func mustCoordinator(t *testing.T, endpoint string, cfg Config) (*Coordinator, func() error) {

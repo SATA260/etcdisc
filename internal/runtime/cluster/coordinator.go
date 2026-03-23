@@ -64,6 +64,17 @@ type Config struct {
 	LeaderKeepAliveInterval time.Duration
 }
 
+// OwnedService represents one locally active service runtime assignment on the current worker.
+type OwnedService struct {
+	Namespace     string
+	Service       string
+	OwnerEpoch    int64
+	OwnerRevision int64
+	InstanceCount int
+	Token         uint64
+	ActivatedAt   time.Time
+}
+
 // Coordinator maintains worker membership and assignment leader election.
 type Coordinator struct {
 	store  port.Store
@@ -77,6 +88,7 @@ type Coordinator struct {
 	members        map[string]model.WorkerMember
 	serviceSeeds   map[string]model.ServiceSeed
 	serviceOwners  map[string]model.ServiceOwner
+	ownedServices  map[string]OwnedService
 	currentLeader  model.AssignmentLeader
 	hasLeader      bool
 	memberLeaseID  port.LeaseID
@@ -112,6 +124,7 @@ func NewCoordinator(store port.Store, logger *slog.Logger, clk clock.Clock, cfg 
 		members:        map[string]model.WorkerMember{},
 		serviceSeeds:   map[string]model.ServiceSeed{},
 		serviceOwners:  map[string]model.ServiceOwner{},
+		ownedServices:  map[string]OwnedService{},
 		electionSignal: make(chan struct{}, 1),
 		memberChanged:  make(chan string, 32),
 	}, nil
@@ -232,6 +245,17 @@ func (c *Coordinator) Members() []model.WorkerMember {
 	items := make([]model.WorkerMember, 0, len(c.members))
 	for _, member := range c.members {
 		items = append(items, member)
+	}
+	return items
+}
+
+// OwnedServices returns the current locally activated service runtime assignments.
+func (c *Coordinator) OwnedServices() []OwnedService {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	items := make([]OwnedService, 0, len(c.ownedServices))
+	for _, owned := range c.ownedServices {
+		items = append(items, owned)
 	}
 	return items
 }
@@ -403,6 +427,7 @@ func (c *Coordinator) ownerWatchLoop() {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
+		c.syncOwnedServices(c.runCtx)
 		watchCh := c.store.Watch(c.runCtx, keyspace.ServiceOwnerPrefix(), 0)
 		reset := false
 		for event := range watchCh {
@@ -427,10 +452,12 @@ func (c *Coordinator) ownerWatchLoop() {
 				c.mu.Lock()
 				c.serviceOwners[serviceKey(owner.Namespace, owner.Service)] = owner
 				c.mu.Unlock()
+				c.syncOwnedServices(c.runCtx)
 			case port.EventDelete:
 				c.mu.Lock()
 				delete(c.serviceOwners, serviceKeyFromOwnerKey(event.Key))
 				c.mu.Unlock()
+				c.syncOwnedServices(c.runCtx)
 			}
 		}
 		if c.runCtx.Err() != nil {
@@ -823,6 +850,63 @@ func (c *Coordinator) reloadServiceOwners(ctx context.Context) error {
 	c.serviceOwners = items
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *Coordinator) syncOwnedServices(ctx context.Context) {
+	owners := c.snapshotOwners()
+	for key, owner := range owners {
+		if owner.OwnerNodeID != c.config.NodeID {
+			c.deactivateOwnedService(key)
+			continue
+		}
+		if err := c.activateOwnedService(ctx, owner); err != nil {
+			c.logger.Warn("owned service activation failed", "namespace", owner.Namespace, "service", owner.Service, "err", err)
+		}
+	}
+	for _, owned := range c.OwnedServices() {
+		key := serviceKey(owned.Namespace, owned.Service)
+		owner, ok := owners[key]
+		if !ok || owner.OwnerNodeID != c.config.NodeID {
+			c.deactivateOwnedService(key)
+		}
+	}
+}
+
+func (c *Coordinator) activateOwnedService(ctx context.Context, owner model.ServiceOwner) error {
+	records, err := c.store.List(ctx, keyspace.InstanceServicePrefix(owner.Namespace, owner.Service))
+	if err != nil {
+		return err
+	}
+	key := serviceKey(owner.Namespace, owner.Service)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, ok := c.ownedServices[key]
+	if ok && current.OwnerEpoch == owner.Epoch && current.OwnerRevision == owner.Revision && current.InstanceCount == len(records) {
+		return nil
+	}
+	token := current.Token + 1
+	c.ownedServices[key] = OwnedService{
+		Namespace:     owner.Namespace,
+		Service:       owner.Service,
+		OwnerEpoch:    owner.Epoch,
+		OwnerRevision: owner.Revision,
+		InstanceCount: len(records),
+		Token:         token,
+		ActivatedAt:   c.clock.Now(),
+	}
+	c.logger.Info("owned service activated", "namespace", owner.Namespace, "service", owner.Service, "ownerEpoch", owner.Epoch, "instanceCount", len(records))
+	return nil
+}
+
+func (c *Coordinator) deactivateOwnedService(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, ok := c.ownedServices[key]
+	if !ok {
+		return
+	}
+	delete(c.ownedServices, key)
+	c.logger.Info("owned service deactivated", "namespace", current.Namespace, "service", current.Service, "lastToken", current.Token)
 }
 
 func (c *Coordinator) reassignAffectedServices(ctx context.Context, departedNodeID string) error {
