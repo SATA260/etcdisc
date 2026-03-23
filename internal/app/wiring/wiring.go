@@ -24,6 +24,7 @@ import (
 	discoverysvc "etcdisc/internal/core/service/discovery"
 	healthsvc "etcdisc/internal/core/service/health"
 	namespacesvc "etcdisc/internal/core/service/namespace"
+	probesvc "etcdisc/internal/core/service/probe"
 	registrysvc "etcdisc/internal/core/service/registry"
 	"etcdisc/internal/infra/clock"
 	"etcdisc/internal/infra/etcd"
@@ -45,6 +46,7 @@ type Dependencies struct {
 	ReadyCheck adminhttp.ReadyCheck
 	Cluster    *cluster.Coordinator
 	Heartbeat  *healthscheduler.HeartbeatSupervisor
+	Probe      *healthscheduler.ProbeScheduler
 }
 
 // Close releases opened infrastructure clients.
@@ -56,6 +58,11 @@ func (d Dependencies) Close() error {
 	}
 	if d.Heartbeat != nil {
 		if err := d.Heartbeat.Close(); err != nil {
+			return err
+		}
+	}
+	if d.Probe != nil {
+		if err := d.Probe.Close(); err != nil {
 			return err
 		}
 	}
@@ -84,6 +91,7 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 	readyCheck := func(ctx context.Context) error { return store.Status(ctx) }
 	var runtimeCluster *cluster.Coordinator
 	var heartbeatSupervisor *healthscheduler.HeartbeatSupervisor
+	var probeScheduler *healthscheduler.ProbeScheduler
 	if cfg.Cluster.Enabled {
 		runtimeCluster, err = cluster.NewCoordinator(store, logger, clk, cluster.Config{
 			Enabled:                 cfg.Cluster.Enabled,
@@ -104,6 +112,8 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 		registryService.SetIngressRecorder(runtimeCluster)
 		heartbeatSupervisor = healthscheduler.NewHeartbeatSupervisor(store, registryService, runtimeCluster, clk, logger)
 		heartbeatSupervisor.Start()
+		probeScheduler = healthscheduler.NewProbeScheduler(store, registryService, runtimeCluster, probesvc.NewService(), clk, logger)
+		probeScheduler.Start()
 	}
 
 	registryAPI := registryhttp.API{Service: registryService}
@@ -159,6 +169,7 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 		ReadyCheck: readyCheck,
 		Cluster:    runtimeCluster,
 		Heartbeat:  heartbeatSupervisor,
+		Probe:      probeScheduler,
 	}, nil
 }
 
