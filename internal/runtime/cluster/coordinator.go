@@ -872,6 +872,11 @@ func (c *Coordinator) syncOwnedServices(ctx context.Context) {
 	}
 }
 
+// ReconcileNow runs one immediate ownership reconciliation pass.
+func (c *Coordinator) ReconcileNow(ctx context.Context) error {
+	return c.reconcileOwners(ctx)
+}
+
 func (c *Coordinator) activateOwnedService(ctx context.Context, owner model.ServiceOwner) error {
 	records, err := c.store.List(ctx, keyspace.InstanceServicePrefix(owner.Namespace, owner.Service))
 	if err != nil {

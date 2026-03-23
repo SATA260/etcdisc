@@ -55,3 +55,29 @@ func TestHeartbeatSupervisorDowngradesOwnedInstance(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.InstanceStatusUnhealth, instance.Status)
 }
+
+func TestHeartbeatSupervisorReconcileRebuildsMissingEntries(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewMemoryStore()
+	clk := namespacesvc.NewFixedClock(time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC))
+	nsService := namespacesvc.NewService(store, clk)
+	_, err := nsService.Create(context.Background(), namespacesvc.CreateNamespaceInput{Name: "prod"})
+	require.NoError(t, err)
+	registry := registrysvc.NewService(store, nsService, healthsvc.NewManager(), clk)
+	_, err = registry.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "pay", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}})
+	require.NoError(t, err)
+	ownerPayload, err := json.Marshal(model.ServiceOwner{Namespace: "prod", Service: "pay", OwnerNodeID: "node-1", Epoch: 1})
+	require.NoError(t, err)
+	_, err = store.Create(context.Background(), keyspace.ServiceOwnerKey("prod", "pay"), ownerPayload, 0)
+	require.NoError(t, err)
+
+	supervisor := NewHeartbeatSupervisor(store, registry, stubCoordinator{owned: []cluster.OwnedService{{Namespace: "prod", Service: "pay", OwnerEpoch: 1, OwnerRevision: 1, InstanceCount: 1}}}, clk, nil)
+	supervisor.ReconcileNow(context.Background())
+	require.Len(t, supervisor.entries, 1)
+
+	delete(supervisor.entries, "prod/pay/node-1")
+	require.Len(t, supervisor.entries, 0)
+	supervisor.ReconcileNow(context.Background())
+	require.Len(t, supervisor.entries, 1)
+}

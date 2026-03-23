@@ -409,3 +409,9 @@ func decodeProbeEntry(record port.Record, owned cluster.OwnedService) (probeEntr
 	}
 	return probeEntry{ServiceKey: owned.Namespace + "/" + owned.Service, Namespace: owned.Namespace, Service: owned.Service, InstanceID: instance.InstanceID, Revision: record.Revision, OwnerEpoch: owned.OwnerEpoch, Status: instance.Status, LastProbeAt: instance.LastProbeAt, ProbeMode: instance.HealthCheckMode, ProbeConfig: instance.ProbeConfig}, true
 }
+
+// ReconcileNow rebuilds local probe entries for the currently owned services.
+func (s *ProbeScheduler) ReconcileNow(ctx context.Context) {
+	runtimeReconcileTotal.Inc()
+	s.syncOwnedServices(ctx)
+}

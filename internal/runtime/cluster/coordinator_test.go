@@ -191,6 +191,27 @@ func TestCoordinatorActivatesOwnedServicesFromOwnerWatch(t *testing.T) {
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
+func TestCoordinatorReconcileRemovesExpiredEmptyOwner(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+	client := mustEtcdClient(t, endpoint)
+	defer client.Close()
+
+	coord1, cleanup1 := mustCoordinator(t, endpoint, Config{Enabled: true, NodeID: "node-1", HTTPAddr: "127.0.0.1:18080", GRPCAddr: "127.0.0.1:19090", MemberTTL: 3 * time.Second, MemberKeepAliveInterval: 300 * time.Millisecond, LeaderTTL: 3 * time.Second, LeaderKeepAliveInterval: 300 * time.Millisecond})
+	defer func() { _ = cleanup1() }()
+	require.Eventually(t, func() bool { return coord1.IsLeader() }, 10*time.Second, 100*time.Millisecond)
+
+	payload, err := json.Marshal(model.ServiceOwner{Namespace: "prod", Service: "stale", OwnerNodeID: "node-1", Epoch: 1, ExpiresAt: time.Now().Add(-time.Minute)})
+	require.NoError(t, err)
+	_, err = client.Put(context.Background(), keyspace.ServiceOwnerKey("prod", "stale"), string(payload))
+	require.NoError(t, err)
+	require.NoError(t, coord1.reloadServiceOwners(context.Background()))
+	require.NoError(t, coord1.ReconcileNow(context.Background()))
+	owner, ok := mustReadOwner(t, client, "prod", "stale")
+	require.False(t, ok)
+	require.Equal(t, model.ServiceOwner{}, owner)
+}
+
 func mustCoordinator(t *testing.T, endpoint string, cfg Config) (*Coordinator, func() error) {
 	t.Helper()
 	client := mustEtcdClient(t, endpoint)

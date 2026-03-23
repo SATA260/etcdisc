@@ -331,6 +331,12 @@ func (s *HeartbeatSupervisor) pruneMissingEntries(ctx context.Context, serviceKe
 	}
 }
 
+// ReconcileNow rebuilds local heartbeat entries for the currently owned services.
+func (s *HeartbeatSupervisor) ReconcileNow(ctx context.Context) {
+	runtimeReconcileTotal.Inc()
+	s.syncOwnedServices(ctx)
+}
+
 func decodeHeartbeatEntry(record port.Record, owned cluster.OwnedService) (heartbeatEntry, bool) {
 	var instance model.Instance
 	if err := json.Unmarshal(record.Value, &instance); err != nil {
