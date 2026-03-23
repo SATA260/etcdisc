@@ -93,6 +93,7 @@ func Build(cfg appconfig.Config) (Dependencies, error) {
 		if err := runtimeCluster.Start(context.Background()); err != nil {
 			return Dependencies{}, err
 		}
+		registryService.SetIngressRecorder(runtimeCluster)
 	}
 
 	registryAPI := registryhttp.API{Service: registryService}

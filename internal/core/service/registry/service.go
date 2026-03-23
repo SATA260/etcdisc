@@ -25,6 +25,12 @@ type Service struct {
 	health     *healthsvc.Manager
 	clock      clock.Clock
 	idCounter  atomic.Uint64
+	ingress    ServiceIngressRecorder
+}
+
+// ServiceIngressRecorder captures the first ingress node for service ownership assignment.
+type ServiceIngressRecorder interface {
+	RecordServiceSeed(ctx context.Context, namespaceName, serviceName string) error
 }
 
 // RegisterInput captures provider registration inputs.
@@ -89,6 +95,11 @@ func NewService(store port.Store, namespaces *namespacesvc.Service, health *heal
 	return &Service{store: store, namespaces: namespaces, health: health, clock: clk}
 }
 
+// SetIngressRecorder installs the optional service seed recorder used by clustered ownership.
+func (s *Service) SetIngressRecorder(recorder ServiceIngressRecorder) {
+	s.ingress = recorder
+}
+
 // Register validates and stores a new runtime instance.
 func (s *Service) Register(ctx context.Context, input RegisterInput) (model.Instance, error) {
 	instance := input.Instance
@@ -127,6 +138,11 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (model.Inst
 		return model.Instance{}, err
 	}
 	instance.Revision = revision
+	if s.ingress != nil {
+		if err := s.ingress.RecordServiceSeed(ctx, instance.Namespace, instance.Service); err != nil {
+			return model.Instance{}, err
+		}
+	}
 	return instance, nil
 }
 

@@ -30,6 +30,31 @@ func WorkerMemberPrefix() string {
 	return root + "/runtime/members/"
 }
 
+// ServiceOwnerKey returns the authoritative owner record key for one namespace and service.
+func ServiceOwnerKey(namespace, service string) string {
+	return fmt.Sprintf("%s/runtime/owners/%s/%s", root, namespace, service)
+}
+
+// ServiceOwnerPrefix returns the owner record root prefix.
+func ServiceOwnerPrefix() string {
+	return root + "/runtime/owners/"
+}
+
+// ServiceOwnerNamespacePrefix returns the owner record prefix for a namespace.
+func ServiceOwnerNamespacePrefix(namespace string) string {
+	return fmt.Sprintf("%s/runtime/owners/%s/", root, namespace)
+}
+
+// ServiceSeedKey returns the service seed key used to record first ingress ownership preference.
+func ServiceSeedKey(namespace, service string) string {
+	return fmt.Sprintf("%s/runtime/service-seeds/%s/%s", root, namespace, service)
+}
+
+// ServiceSeedPrefix returns the service seed prefix.
+func ServiceSeedPrefix() string {
+	return root + "/runtime/service-seeds/"
+}
+
 // NamespaceKey returns the key for namespace metadata.
 func NamespaceKey(name string) string {
 	return fmt.Sprintf("%s/namespaces/%s", root, name)
@@ -134,7 +159,7 @@ func ResourceFromKey(key string) string {
 		return "capability"
 	case strings.HasPrefix(key, AuditPrefix()):
 		return "audit"
-	case key == AssignmentLeaderKey() || strings.HasPrefix(key, WorkerMemberPrefix()):
+	case key == AssignmentLeaderKey() || strings.HasPrefix(key, WorkerMemberPrefix()) || strings.HasPrefix(key, ServiceOwnerPrefix()) || strings.HasPrefix(key, ServiceSeedPrefix()):
 		return "runtime"
 	default:
 		return "unknown"
