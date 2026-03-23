@@ -1,0 +1,15 @@
+app:
+  name: etcdisc
+  env: dev
+http:
+  host: 0.0.0.0
+  port: 8080
+grpc:
+  host: 0.0.0.0
+  port: 9090
+etcd:
+  endpoints:
+    - 127.0.0.1:2379
+  dialMS: 3000
+admin:
+  token: change-me-in-dev
