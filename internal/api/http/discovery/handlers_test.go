@@ -57,10 +57,27 @@ func TestDiscoveryAPI(t *testing.T) {
 	require.Contains(t, watchResp.Body.String(), "event: put")
 	cancel()
 
+	metadataResp := httptest.NewRecorder()
+	api.Snapshot(metadataResp, httptest.NewRequest(http.MethodGet, "/v1/discovery/instances?namespace=prod-core&service=payment-api&meta.zone=a&healthyOnly=false", nil))
+	require.Equal(t, http.StatusOK, metadataResp.Code)
+
 	watchMethodResp := httptest.NewRecorder()
 	api.Watch(watchMethodResp, httptest.NewRequest(http.MethodPost, "/v1/discovery/watch", nil))
 	require.Equal(t, http.StatusMethodNotAllowed, watchMethodResp.Code)
 
 	plain := &plainWriter{header: http.Header{}}
 	api.Watch(plain, httptest.NewRequest(http.MethodGet, "/v1/discovery/watch?namespace=prod-core&service=payment-api", nil))
+}
+
+func TestDiscoveryHelpers(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/?healthyOnly=true&meta.zone=a&meta.color=blue", nil)
+	value, ok := parseBoolQuery(req, "healthyOnly")
+	require.True(t, ok)
+	require.True(t, value)
+	_, ok = parseBoolQuery(httptest.NewRequest(http.MethodGet, "/?healthyOnly=not-bool", nil), "healthyOnly")
+	require.False(t, ok)
+	require.Equal(t, map[string]string{"zone": "a", "color": "blue"}, parseMetadataFilters(req))
+	require.Nil(t, parseMetadataFilters(httptest.NewRequest(http.MethodGet, "/", nil)))
 }

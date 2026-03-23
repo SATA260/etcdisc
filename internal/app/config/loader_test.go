@@ -71,3 +71,31 @@ func TestLoadUsesDefaultsWithoutFile(t *testing.T) {
 	require.Equal(t, 30, cfg.Cluster.MemberTTLSeconds)
 	require.NotEmpty(t, cfg.Admin.Token)
 }
+
+func TestLoadRejectsInvalidBoolAndIntOverrides(t *testing.T) {
+	t.Setenv("ETCDISC_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("ETCDISC_CLUSTER_ENABLED", "not-bool")
+	_, err := Load()
+	require.Error(t, err)
+
+	t.Setenv("ETCDISC_CLUSTER_ENABLED", "true")
+	t.Setenv("ETCDISC_CLUSTER_MEMBER_TTL_SECONDS", "bad-int")
+	_, err = Load()
+	require.Error(t, err)
+}
+
+func TestHelperParsing(t *testing.T) {
+	t.Setenv("ETCDISC_CLUSTER_ENABLED", "true")
+	parsed, ok, err := parseBoolEnv("ETCDISC_CLUSTER_ENABLED")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, parsed)
+
+	t.Setenv("ETCDISC_CLUSTER_ENABLED", "")
+	parsed, ok, err = parseBoolEnv("ETCDISC_CLUSTER_ENABLED")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.False(t, parsed)
+
+	require.Equal(t, []string{"a", "b", "c"}, splitAndTrim(" a, ,b, c "))
+}

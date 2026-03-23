@@ -55,6 +55,41 @@ func TestBuildAndClose(t *testing.T) {
 	require.NoError(t, deps.Close())
 }
 
+func TestBuildWithClusterEnabled(t *testing.T) {
+	endpoint, stopEtcd := startEmbeddedEtcd(t)
+	defer stopEtcd()
+
+	cfg := appconfig.Default()
+	cfg.Etcd.Endpoints = []string{endpoint}
+	cfg.Admin.Token = "secret"
+	cfg.Cluster.Enabled = true
+	cfg.Cluster.NodeID = "node-test"
+	deps, err := Build(cfg)
+	require.NoError(t, err)
+	defer func() { _ = deps.Close() }()
+	require.NotNil(t, deps.Cluster)
+	require.NotNil(t, deps.Heartbeat)
+	require.NotNil(t, deps.Probe)
+	require.Eventually(t, func() bool {
+		members := deps.Cluster.Members()
+		return len(members) == 1 && members[0].NodeID == "node-test"
+	}, 10*time.Second, 100*time.Millisecond)
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/v1/system", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	deps.Router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+}
+
+func TestWiringHelpers(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "a", firstNonEmpty("", "a", "b"))
+	require.Equal(t, "", firstNonEmpty())
+	require.Equal(t, "127.0.0.1:8080", normalizeAdvertiseAddr("0.0.0.0", 8080))
+	require.Equal(t, "127.0.0.1:8080", normalizeAdvertiseAddr("", 8080))
+	require.Equal(t, "127.0.0.1:8080", normalizeAdvertiseAddr("127.0.0.1", 8080))
+}
+
 func startEmbeddedEtcd(t *testing.T) (string, func()) {
 	t.Helper()
 	cfg := embed.NewConfig()

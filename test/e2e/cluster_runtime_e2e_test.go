@@ -52,27 +52,48 @@ func TestClusterRuntimeAnyNodeIngressButOwnerExclusiveMaintenance(t *testing.T) 
 	require.Eventually(t, func() bool { return coord1.IsLeader() != coord2.IsLeader() }, 10*time.Second, 100*time.Millisecond)
 
 	require.NoError(t, coord2.RecordServiceSeed(context.Background(), "prod", "payment-api", 1))
-	registered, err := registry1.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}})
+	var initialOwner string
+	require.Eventually(t, func() bool {
+		owner, ok := readClusterRuntimeOwner(t, client1, "prod", "payment-api")
+		if !ok || owner.OwnerNodeID == "" {
+			return false
+		}
+		initialOwner = owner.OwnerNodeID
+		return true
+	}, 10*time.Second, 100*time.Millisecond)
+	registerVia := registry1
+	if initialOwner == "node-1" {
+		registerVia = registry2
+	}
+	registered, err := registerVia.Register(context.Background(), registrysvc.RegisterInput{Instance: model.Instance{Namespace: "prod", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080}})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		leftOwns := len(coord1.OwnedServices()) == 1 && len(hb1.OwnedEntries()) == 1 && len(probe1.OwnedEntries()) == 0
-		rightOwns := len(coord2.OwnedServices()) == 1 && len(hb2.OwnedEntries()) == 1 && len(probe2.OwnedEntries()) == 0
-		return leftOwns || rightOwns
-	}, 10*time.Second, 100*time.Millisecond)
-
-	require.Eventually(t, func() bool {
+		if initialOwner == "node-1" {
+			owned := coord1.OwnedServices()
+			return len(owned) == 1 && owned[0].Service == "payment-api" && len(hb1.OwnedEntries()) == 1 && len(probe1.OwnedEntries()) == 0
+		}
 		owned := coord2.OwnedServices()
-		return len(owned) == 1 && owned[0].Service == "payment-api"
+		return len(owned) == 1 && owned[0].Service == "payment-api" && len(hb2.OwnedEntries()) == 1 && len(probe2.OwnedEntries()) == 0
 	}, 10*time.Second, 100*time.Millisecond)
-	oldEpoch := coord2.OwnedServices()[0].OwnerEpoch
-	require.NoError(t, cleanup2())
+	oldEpoch := int64(0)
+	if initialOwner == "node-1" {
+		oldEpoch = coord1.OwnedServices()[0].OwnerEpoch
+		require.NoError(t, cleanup1())
+	} else {
+		oldEpoch = coord2.OwnedServices()[0].OwnerEpoch
+		require.NoError(t, cleanup2())
+	}
 	require.Eventually(t, func() bool {
+		if initialOwner == "node-1" {
+			owned := coord2.OwnedServices()
+			return len(owned) == 1 && owned[0].Service == "payment-api" && owned[0].OwnerEpoch > oldEpoch
+		}
 		owned := coord1.OwnedServices()
 		return len(owned) == 1 && owned[0].Service == "payment-api" && owned[0].OwnerEpoch > oldEpoch
 	}, 10*time.Second, 100*time.Millisecond)
 
-	_, _, err = registry1.ApplyHeartbeatTimeout(context.Background(), registrysvc.HeartbeatTimeoutInput{Namespace: "prod", Service: "payment-api", InstanceID: registered.InstanceID, ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: oldEpoch})
+	_, _, err = registerVia.ApplyHeartbeatTimeout(context.Background(), registrysvc.HeartbeatTimeoutInput{Namespace: "prod", Service: "payment-api", InstanceID: registered.InstanceID, ExpectedRevision: registered.Revision, ExpectedOwnerEpoch: oldEpoch})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "epoch")
 }
@@ -113,6 +134,8 @@ func TestClusterRuntimeServiceOwnerTTLCleanup(t *testing.T) {
 	payload, err := json.Marshal(owner)
 	require.NoError(t, err)
 	_, err = client.Put(context.Background(), keyspace.ServiceOwnerKey("prod", "ttl-api"), string(payload))
+	require.NoError(t, err)
+	_, err = client.Delete(context.Background(), keyspace.ServiceSeedKey("prod", "ttl-api"))
 	require.NoError(t, err)
 	require.NoError(t, leader.ReconcileNow(context.Background()))
 	_, ok = readClusterRuntimeOwner(t, client, "prod", "ttl-api")

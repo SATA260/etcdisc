@@ -64,6 +64,18 @@ func TestAdminHandlers(t *testing.T) {
 	ConfigAPI{Service: configService, Audit: auditService}.HandleItems(deleteResp, httptest.NewRequest(http.MethodDelete, "/admin/v1/config/items", strings.NewReader(`{"scope":"service","namespace":"prod-core","service":"payment-api","key":"timeout.request","expectedRevision":`+strconv.FormatInt(items[0].Revision, 10)+`}`)))
 	require.Equal(t, http.StatusOK, deleteResp.Code)
 
+	configMethodResp := httptest.NewRecorder()
+	ConfigAPI{Service: configService}.HandleItems(configMethodResp, httptest.NewRequest(http.MethodPatch, "/admin/v1/config/items", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, configMethodResp.Code)
+
+	configNoAuditResp := httptest.NewRecorder()
+	ConfigAPI{Service: configService}.HandleItems(configNoAuditResp, httptest.NewRequest(http.MethodPost, "/admin/v1/config/items", strings.NewReader(`{"item":{"scope":"service","namespace":"prod-core","service":"payment-api","key":"retry.max","value":"3","valueType":"int"}}`)))
+	require.Equal(t, http.StatusCreated, configNoAuditResp.Code)
+
+	badDeleteResp := httptest.NewRecorder()
+	ConfigAPI{Service: configService}.HandleItems(badDeleteResp, httptest.NewRequest(http.MethodDelete, "/admin/v1/config/items", strings.NewReader(`{"scope":`)))
+	require.Equal(t, http.StatusBadRequest, badDeleteResp.Code)
+
 	instancesResp := httptest.NewRecorder()
 	InstanceAPI{Service: registry}.HandleList(instancesResp, httptest.NewRequest(http.MethodGet, "/admin/v1/services/instances?namespace=prod-core", nil))
 	require.Equal(t, http.StatusOK, instancesResp.Code)

@@ -75,6 +75,14 @@ func TestInstanceValidateRejectsInvalidWeight(t *testing.T) {
 	}
 
 	require.Error(t, instance.Validate())
+
+	instance = Instance{Namespace: "prod", Service: "payment-api", InstanceID: "node-1", Address: "bad host!", Port: 8080, Weight: 100, HealthCheckMode: HealthCheckHeartbeat, Status: InstanceStatusHealth, Metadata: map[string]string{}}
+	require.Error(t, instance.Validate())
+
+	instance = Instance{Namespace: "prod", Service: "payment-api", InstanceID: "node-1", Address: "127.0.0.1", Port: 8080, Weight: 100, HealthCheckMode: HealthCheckHTTPProbe, Status: InstanceStatusHealth, ProbeConfig: ProbeConfig{Address: "", Port: 0}, Metadata: map[string]string{}}
+	instance.Normalize()
+	instance.ProbeConfig.Address = ""
+	require.Error(t, instance.Validate())
 }
 
 func TestConfigItemValidate(t *testing.T) {
@@ -92,6 +100,16 @@ func TestConfigItemValidate(t *testing.T) {
 	require.NoError(t, item.Validate())
 
 	item.Value = "abc"
+	require.Error(t, item.Validate())
+
+	item = ConfigItem{Scope: ConfigScopeNamespace, Namespace: "prod", Key: "feature.enabled", Value: "true", ValueType: ConfigValueBool}
+	require.NoError(t, item.Validate())
+	item.Value = "not-bool"
+	require.Error(t, item.Validate())
+
+	item = ConfigItem{Scope: ConfigScopeGlobal, Key: "payload", Value: `{"enabled":true}`, ValueType: ConfigValueJSON}
+	require.NoError(t, item.Validate())
+	item.Value = `{invalid`
 	require.Error(t, item.Validate())
 }
 
@@ -114,6 +132,9 @@ func TestAgentCardValidate(t *testing.T) {
 	require.True(t, AuthModeMTLS.Valid())
 
 	card.Capabilities = []string{"Bad Capability"}
+	require.Error(t, card.Validate())
+
+	card = AgentCard{Namespace: "prod", AgentID: "assistant-1", Service: "agent-api", Capabilities: []string{"tool.search"}, Protocols: []string{"grpc"}, AuthMode: AuthMode("bad")}
 	require.Error(t, card.Validate())
 }
 
